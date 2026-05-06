@@ -171,10 +171,10 @@ async def lifespan(app: FastAPI):
     global _observer
     log.info("dashboard_startup")
 
-    _rebuild()
-
     refresh_task = asyncio.create_task(_auto_refresh())
     external_task = asyncio.create_task(_external_on_startup())
+    # Rebuild in background so the server starts immediately
+    asyncio.create_task(asyncio.to_thread(_rebuild))
     weekly_task = asyncio.create_task(_weekly_scheduler())
     monthly_task = asyncio.create_task(_monthly_scheduler())
 
@@ -207,7 +207,7 @@ app = FastAPI(title="S'investir Dashboard API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
