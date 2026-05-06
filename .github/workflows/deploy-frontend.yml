@@ -1,4 +1,4 @@
-name: Deploy Frontend → Vercel
+name: Deploy Frontend → Cloud Run
 
 on:
   push:
@@ -7,18 +7,52 @@ on:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend.yml'
 
+env:
+  PROJECT_ID: sinvestir-dashboard-2026
+  REGION: europe-west1
+  SERVICE: sinvestir-dashboard-frontend
+  REGISTRY: europe-west1-docker.pkg.dev
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # requis pour Workload Identity Federation
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: frontend
-          vercel-args: '--prod'
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Build & push image
+        working-directory: frontend
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.BACKEND_URL }} \
+            -t $REGISTRY/$PROJECT_ID/sinvestir/dashboard-frontend:$GITHUB_SHA .
+          docker push $REGISTRY/$PROJECT_ID/sinvestir/dashboard-frontend:$GITHUB_SHA
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE \
+            --image $REGISTRY/$PROJECT_ID/sinvestir/dashboard-frontend:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "AUTH_PASSWORD=${{ secrets.AUTH_PASSWORD }}" \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project $PROJECT_ID
