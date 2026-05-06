@@ -1,0 +1,59 @@
+name: Deploy Backend → Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: europe-west1
+  SERVICE: sinvestir-dashboard-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build & push image via Cloud Build
+        working-directory: backend
+        run: |
+          gcloud builds submit \
+            --tag europe-west1-docker.pkg.dev/$PROJECT_ID/sinvestir/dashboard-api:$GITHUB_SHA \
+            --project $PROJECT_ID
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE \
+            --image europe-west1-docker.pkg.dev/$PROJECT_ID/sinvestir/dashboard-api:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "GSHEETS_STATS_ID=${{ secrets.GSHEETS_STATS_ID }}" \
+            --set-env-vars "GSHEETS_ADS_ID=${{ secrets.GSHEETS_ADS_ID }}" \
+            --set-env-vars "GSHEETS_CREDS_PATH=/app/credentials/google-service-account.json" \
+            --set-env-vars "SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}" \
+            --set-env-vars "NOTION_API_KEY=${{ secrets.NOTION_API_KEY }}" \
+            --set-env-vars "NOTION_WEEKLY_DB_ID=${{ secrets.NOTION_WEEKLY_DB_ID }}" \
+            --set-env-vars "AC_API_URL=${{ secrets.AC_API_URL }}" \
+            --set-env-vars "AC_API_KEY=${{ secrets.AC_API_KEY }}" \
+            --set-env-vars "ICLOSED_API_KEY=${{ secrets.ICLOSED_API_KEY }}" \
+            --set-env-vars "COUT_AGENCE_MENSUEL=${{ secrets.COUT_AGENCE_MENSUEL }}" \
+            --set-env-vars "DASHBOARD_URL=${{ secrets.DASHBOARD_URL }}" \
+            --memory 1Gi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --project $PROJECT_ID
