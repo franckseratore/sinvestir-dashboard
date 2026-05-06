@@ -61,7 +61,9 @@ def _get_client(creds_path: str = None):
             )
             creds.refresh(Request())
         else:
-            raise RuntimeError("Aucun credential Google trouvé. Configurez GSHEETS_CREDS_B64 en production.")
+            # Cloud Run / GCE — utilise l'identité du service account attaché
+            import google.auth
+            creds, _ = google.auth.default(scopes=_SCOPES)
 
         _client_cache = gspread.authorize(creds)
     return _client_cache

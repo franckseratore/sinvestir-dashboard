@@ -53,4 +53,5 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 3 \
+            --service-account ${{ secrets.WIF_SERVICE_ACCOUNT }} \
             --project $PROJECT_ID
