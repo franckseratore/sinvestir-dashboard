@@ -278,3 +278,15 @@ def trigger_monthly_report():
     except Exception as e:
         return _json({"ok": False, "error": str(e)})
 
+
+@router.post("/api/admin/refresh")
+def trigger_refresh():
+    """Force le rechargement immédiat des données depuis Google Sheets."""
+    import asyncio
+    from .main import _rebuild, _rebuild_external
+    try:
+        _rebuild()
+        return _json({"ok": True, "message": "Données rechargées depuis Google Sheets"})
+    except Exception as e:
+        return _json({"ok": False, "error": str(e)})
+

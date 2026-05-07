@@ -57,6 +57,23 @@ export default function TargetsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<Record<string, true>>({})
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState('')
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    setRefreshMsg('')
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/admin/refresh`, { method: 'POST' })
+      const data = await res.json()
+      setRefreshMsg(data.ok ? 'Données rechargées ✓' : `Erreur : ${data.error}`)
+    } catch {
+      setRefreshMsg('Erreur de connexion')
+    } finally {
+      setRefreshing(false)
+      setTimeout(() => setRefreshMsg(''), 3000)
+    }
+  }
 
   useEffect(() => {
     api.adminTargets().then((data) => { setRows(data); setLoading(false) })
@@ -79,9 +96,21 @@ export default function TargetsPage() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-brand">Targets & Seuils</h1>
-        <p className="text-sm text-zinc-500 mt-1">Cliquer sur une valeur pour la modifier. Entrée ou clic hors champ pour sauvegarder.</p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-brand">Targets & Seuils</h1>
+          <p className="text-sm text-zinc-500 mt-1">Cliquer sur une valeur pour la modifier. Entrée ou clic hors champ pour sauvegarder.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {refreshMsg && <span className="text-xs text-emerald-600">{refreshMsg}</span>}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 disabled:opacity-50 transition-colors"
+          >
+            {refreshing ? 'Rechargement…' : '↻ Forcer la mise à jour'}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden shadow-sm">
