@@ -4,7 +4,8 @@ import { useApi } from '@/hooks/use-api'
 import { api, type OverviewData, type GlobalStatusData } from '@/lib/api'
 import { KpiCard } from '@/components/kpi-card'
 import { HeroKpiCard } from '@/components/hero-kpi-card'
-import { GlobalStatusBanner } from '@/components/global-status-banner'
+import { ScoreWidget } from '@/components/score-widget'
+import { KpiLegend } from '@/components/kpi-legend'
 import { DomainSummary } from '@/components/domain-summary'
 import { PeriodSelector } from '@/components/period-selector'
 import { DriveStatusBanner } from '@/components/drive-status-bar'
@@ -139,14 +140,12 @@ export default function OverviewPage() {
 
       <DriveStatusBanner />
 
-      {/* Niveau 1 — Statut global */}
+      {/* Niveau 1 — Score de la semaine (Axe 1) */}
       {gs && (
-        <GlobalStatusBanner
-          worst_status={gs.worst_status}
-          phrase={gs.phrase}
-          critical_count={gs.critical_count}
-          warning_count={gs.warning_count}
-        />
+        <div className="space-y-2">
+          <ScoreWidget gs={gs} />
+          <KpiLegend />
+        </div>
       )}
 
       {/* Alertes consolidées — tous onglets */}

@@ -3,6 +3,7 @@ import { useQueryState } from 'nuqs'
 import { useApi } from '@/hooks/use-api'
 import { api, type SalesData } from '@/lib/api'
 import { KpiCard } from '@/components/kpi-card'
+import { KpiLegend } from '@/components/kpi-legend'
 import { PeriodSelector } from '@/components/period-selector'
 import { DriveStatusBanner } from '@/components/drive-status-bar'
 import { DataTable } from '@/components/data-table'
@@ -104,6 +105,8 @@ export default function SalesPage() {
       </div>
 
       <DriveStatusBanner />
+
+      <KpiLegend />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-4">

@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { api, IClosedData } from '@/lib/api'
 import { PeriodSelector } from '@/components/period-selector'
 import { DataTable } from '@/components/data-table'
+import { KpiLegend } from '@/components/kpi-legend'
 
 function fmt_pct(v: number | null) {
   if (v === null || v === undefined) return '—'
@@ -185,6 +186,8 @@ function IClosedContent() {
         </div>
         <PeriodSelector />
       </div>
+
+      <KpiLegend />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">

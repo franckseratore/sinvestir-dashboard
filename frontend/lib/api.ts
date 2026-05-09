@@ -20,6 +20,8 @@ export type KpiCard = {
   trend_alert: boolean
   target: number | null
   seuil_critique: number | null
+  pct_atteinte: number | null
+  pct_status: 'green' | 'orange' | 'red' | 'unknown'
   format: string
   sparkline: number[]
   moving_avg_4w: number | null
@@ -135,8 +137,23 @@ export type GlobalStatusKpi = {
   domain: string
   href: string
   value: number | null
+  target?: number | null
   format: string
   status: 'green' | 'orange' | 'red' | 'unknown'
+  pct_atteinte?: number | null
+  pct_status?: 'green' | 'orange' | 'red' | 'unknown'
+}
+
+export type TopAlert = {
+  key: string
+  label: string
+  domain: string
+  href: string
+  value: number | null
+  target: number | null
+  format: string
+  pct_atteinte: number | null
+  tier: 1 | 2
 }
 
 export type GlobalStatusData = {
@@ -147,6 +164,14 @@ export type GlobalStatusData = {
   warning_count: number
   critical_kpis: GlobalStatusKpi[]
   domains: Record<string, { green: number; orange: number; red: number; unknown: number; total: number }>
+  // ── Axe 1 : score & top_alert ──
+  total: number
+  green: number
+  orange: number
+  red: number
+  excluded: number
+  score_pct: number | null
+  top_alert: TopAlert | null
 }
 
 type ApiParams = { period: string; compare?: boolean; start?: string; end?: string }

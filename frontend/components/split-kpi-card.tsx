@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { formatValue } from '@/lib/format'
 import { StatusBadge } from './status-badge'
 import { TrendArrow } from './trend-arrow'
+import { PctBadge } from './pct-badge'
 import { Info } from 'lucide-react'
 import type { KpiCard as KpiCardData } from '@/lib/api'
 
@@ -57,14 +58,19 @@ export function SplitKpiCard({ title, data, splits, sens = 'Haut', tooltip, clas
         )}
       </div>
 
-      {/* Target */}
-      {data.target !== null && data.target !== undefined && (
-        <div className="flex items-center gap-2 text-[10px] text-zinc-400">
-          <span>Cible : <span className="font-mono">{formatValue(data.target, data.format)}</span></span>
-          {data.seuil_critique !== null && data.seuil_critique !== undefined && (
-            <span>• Seuil : <span className="font-mono">{formatValue(data.seuil_critique, data.format)}</span></span>
-          )}
+      {/* Objectif + badge % atteint (Axe 1) */}
+      {data.target !== null && data.target !== undefined ? (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <span>Objectif : <span className="font-mono font-medium text-zinc-700">{formatValue(data.target, data.format)}</span></span>
+            {data.seuil_critique !== null && data.seuil_critique !== undefined && (
+              <span className="text-zinc-400">• Seuil : <span className="font-mono">{formatValue(data.seuil_critique, data.format)}</span></span>
+            )}
+          </div>
+          <PctBadge pct={data.pct_atteinte} pctStatus={data.pct_status} />
         </div>
+      ) : (
+        <div className="text-[11px] text-zinc-400 italic">Pas d&apos;objectif</div>
       )}
 
       {/* Split row */}

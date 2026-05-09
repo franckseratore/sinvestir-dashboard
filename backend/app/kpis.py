@@ -38,10 +38,47 @@ def _get_target(indicateur: str) -> Optional[dict]:
 def _scale_target(t: Optional[dict], period: Period) -> tuple:
     if not t:
         return None, None
+    # Garde année : si la période est ENTIÈREMENT hors-2026 (avant ou après), pas de comparaison.
+    # Période chevauchante (ex. last_30_days fin janvier 2026 ↔ déc 2025) : on conserve la comparaison aux targets 2026.
+    if (period.start.year < 2026 and period.end.year < 2026) or (period.start.year > 2026 and period.end.year > 2026):
+        log.warning("target_skipped_out_of_2026", start=str(period.start), end=str(period.end))
+        return None, None
     if not t.get("prorata", False):
         return t["target"], t["seuil"]
     scale = period.days / 30.0
     return t["target"] * scale, t["seuil"] * scale
+
+
+def _compute_pct_atteinte(value: Optional[float], target: Optional[float], sens: Optional[str]) -> tuple:
+    """Calcule le % atteint et le pct_status selon les seuils universels du brief.
+
+    Logique :
+    - sens=Haut → pct_atteinte = (value / target) * 100   (plus c'est haut, mieux c'est)
+    - sens=Bas  → pct_atteinte = (target / value) * 100   (logique inversée : CPL, no_show, budget…)
+    - target=None ou 0 ou value=None → pct_atteinte=None, pct_status='unknown'
+    - Plafond stockage : 999 % (évite les valeurs aberrantes en cas de division par très petit nombre).
+    - Plafond métier (Q4 verrouillé) : un KPI à 200 % compte comme 'atteint' (vert), pas plus.
+      Le pct_status est donc déterminé par les seuils 100/80, sans pondération au-delà.
+    """
+    if value is None or target is None or target == 0:
+        return None, "unknown"
+    if not sens:
+        return None, "unknown"
+    if sens == "Haut":
+        pct = (value / target) * 100
+    else:
+        if value == 0:
+            pct = 999.0
+        else:
+            pct = (target / value) * 100
+    pct = min(pct, 999.0)
+    if pct >= 100:
+        st = "green"
+    elif pct >= 80:
+        st = "orange"
+    else:
+        st = "red"
+    return round(pct, 1), st
 
 
 def _status(value: Optional[float], target: Optional[float], seuil: Optional[float], sens: Optional[str]) -> str:
@@ -142,6 +179,8 @@ def _kpi_card(
     if trend_alert and st != "red":
         st = "red"
 
+    pct_atteinte, pct_st = _compute_pct_atteinte(value, scaled_target, sens)
+
     def _r(v):
         return round(float(v), 2) if v is not None else None
 
@@ -154,6 +193,8 @@ def _kpi_card(
         "trend_alert": bool(trend_alert),
         "target": _r(scaled_target),
         "seuil_critique": _r(scaled_seuil),
+        "pct_atteinte": pct_atteinte,
+        "pct_status": pct_st,
         "format": fmt,
         "sparkline": sparkline_vals or [],
         "moving_avg_4w": _r(moving_avg_4w),
@@ -822,30 +863,40 @@ def global_status(period: Period) -> dict:
                 "domain": domain,
                 "href": href,
                 "value": result.get("value"),
+                "target": result.get("target"),
                 "format": result.get("format", "number"),
                 "status": result.get("status", "unknown"),
+                "pct_atteinte": result.get("pct_atteinte"),
+                "pct_status": result.get("pct_status", "unknown"),
             })
         except Exception:
             pass
 
-    # Bénéfice Net Paid (MTD, indépendant de la période)
+    # Bénéfice Net Paid (MTD, indépendant de la période — ne passe pas par _kpi_card())
     try:
         b = benefice_net_paid()
         t = _get_target("benefice_net_paid")
-        b_status = _status(b["benefice_net"], t["target"] if t else None, t["seuil"] if t else None, t["sens"] if t else None)
+        b_target = t["target"] if t else None
+        b_seuil = t["seuil"] if t else None
+        b_sens = t["sens"] if t else None
+        b_status = _status(b["benefice_net"], b_target, b_seuil, b_sens)
+        b_pct, b_pct_status = _compute_pct_atteinte(b["benefice_net"], b_target, b_sens)
         all_kpis.append({
             "key": "benefice_net_paid",
             "label": "Bénéfice Net Paid (MTD)",
             "domain": "ads",
             "href": "/ads",
             "value": b["benefice_net"],
+            "target": b_target,
             "format": "currency",
             "status": b_status,
+            "pct_atteinte": b_pct,
+            "pct_status": b_pct_status,
         })
     except Exception:
         pass
 
-    # Domain summaries
+    # Domain summaries (rétro-compat : utilisé par <DomainSummary>)
     domains: dict = {}
     for kpi in all_kpis:
         d = kpi["domain"]
@@ -861,7 +912,7 @@ def global_status(period: Period) -> dict:
     if critical_kpis:
         worst = "red"
         n = len(critical_kpis)
-        phrase = f"{n} KPI{'s' if n > 1 else ''} critique{'s' if n > 1 else ''} — voir détails ci-dessous."
+        phrase = f"{n} KPI{'s' if n > 1 else ''} au-dessus du seuil critique métier."
     elif warning_kpis:
         worst = "orange"
         n = len(warning_kpis)
@@ -870,6 +921,45 @@ def global_status(period: Period) -> dict:
         worst = "green"
         phrase = "Tous les KPIs sont dans les clous."
 
+    # ── Score & top_alert (Q3 + Q4 verrouillés) ──
+    # Score = N_verts (pct_status=green) / N_avec_objectif (pct_status != unknown).
+    # KPIs sans objectif (pct_status=unknown) sont exclus du calcul, comptés comme "hors comparaison".
+    with_target = [k for k in all_kpis if k.get("pct_status") in ("green", "orange", "red")]
+    excluded = len(all_kpis) - len(with_target)
+    green_pct = sum(1 for k in with_target if k["pct_status"] == "green")
+    orange_pct = sum(1 for k in with_target if k["pct_status"] == "orange")
+    red_pct = sum(1 for k in with_target if k["pct_status"] == "red")
+    total = len(with_target)
+    score_pct = round(green_pct / total * 100, 1) if total > 0 else None
+
+    # top_alert : 2 tiers (Q3 verrouillé)
+    # Tier 1 : argmin(pct_atteinte) parmi status=="red" (priorité métier — au-delà du seuil_critique)
+    # Tier 2 : argmin(pct_atteinte) parmi pct_status=="red" (badge rouge universel <80 %)
+    # Tier 3 : null (tout est nominal)
+    def _alert_payload(k: dict, tier: int) -> dict:
+        return {
+            "key": k["key"],
+            "label": k["label"],
+            "domain": k["domain"],
+            "href": k["href"],
+            "value": k.get("value"),
+            "target": k.get("target"),
+            "format": k.get("format", "number"),
+            "pct_atteinte": k.get("pct_atteinte"),
+            "tier": tier,
+        }
+
+    top_alert = None
+    tier1 = [k for k in critical_kpis if k.get("pct_atteinte") is not None]
+    if tier1:
+        worst_kpi = min(tier1, key=lambda k: k["pct_atteinte"])
+        top_alert = _alert_payload(worst_kpi, 1)
+    else:
+        tier2 = [k for k in with_target if k.get("pct_status") == "red" and k.get("pct_atteinte") is not None]
+        if tier2:
+            worst_kpi = min(tier2, key=lambda k: k["pct_atteinte"])
+            top_alert = _alert_payload(worst_kpi, 2)
+
     return {
         "worst_status": worst,
         "phrase": phrase,
@@ -877,6 +967,14 @@ def global_status(period: Period) -> dict:
         "warning_count": len(warning_kpis),
         "critical_kpis": critical_kpis,
         "domains": domains,
+        # ── Nouveaux champs (Axe 1) ──
+        "total": total,
+        "green": green_pct,
+        "orange": orange_pct,
+        "red": red_pct,
+        "excluded": excluded,
+        "score_pct": score_pct,
+        "top_alert": top_alert,
     }
 
 

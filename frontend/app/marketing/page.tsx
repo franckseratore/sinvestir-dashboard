@@ -4,6 +4,7 @@ import { useApi } from '@/hooks/use-api'
 import { api, type MarketingData } from '@/lib/api'
 import { KpiCard } from '@/components/kpi-card'
 import { SplitKpiCard } from '@/components/split-kpi-card'
+import { KpiLegend } from '@/components/kpi-legend'
 import { PeriodSelector } from '@/components/period-selector'
 import { DriveStatusBanner } from '@/components/drive-status-bar'
 import { DataTable } from '@/components/data-table'
@@ -101,6 +102,8 @@ export default function MarketingPage() {
       </div>
 
       <DriveStatusBanner />
+
+      <KpiLegend />
 
       {/* KPI Cards — 4 cartes (7 → 4) */}
       <div className="grid grid-cols-2 gap-4">

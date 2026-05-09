@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { api, EmailData } from '@/lib/api'
 import { DataTable } from '@/components/data-table'
+import { KpiLegend } from '@/components/kpi-legend'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -202,6 +203,8 @@ export default function EmailPage() {
         <h1 className="text-xl font-bold text-zinc-900">Email Marketing</h1>
         <p className="text-sm text-zinc-400 mt-0.5">ActiveCampaign — 30 derniers jours</p>
       </div>
+
+      <KpiLegend />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">

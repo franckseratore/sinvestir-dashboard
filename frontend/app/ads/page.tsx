@@ -3,6 +3,7 @@ import { useQueryState } from 'nuqs'
 import { useApi } from '@/hooks/use-api'
 import { api, type AdsData } from '@/lib/api'
 import { KpiCard } from '@/components/kpi-card'
+import { KpiLegend } from '@/components/kpi-legend'
 import { PeriodSelector } from '@/components/period-selector'
 import { DriveStatusBanner } from '@/components/drive-status-bar'
 import { DataTable } from '@/components/data-table'
@@ -106,6 +107,8 @@ export default function AdsPage() {
       </div>
 
       <DriveStatusBanner />
+
+      <KpiLegend />
 
       {/* Meta vs Google — angle de pilotage quotidien, en premier */}
       <section className="space-y-3">
