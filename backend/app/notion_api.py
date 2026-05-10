@@ -137,6 +137,59 @@ def _kpi_line(label: str, kpi: dict, fmt_fn) -> str:
     return f"{em} {label} : {val}{delta}"
 
 
+def _format_alert_value(value, fmt: str) -> str:
+    if value is None:
+        return "—"
+    if fmt == "currency":
+        return _fc(value)
+    if fmt == "percent":
+        return _fp(value)
+    if fmt == "number":
+        return _fn(value)
+    return _fx(value)
+
+
+def _score_callout_text(global_status: dict) -> Optional[str]:
+    """Build a single-line summary text for the Score callout at the top of the Notion page.
+
+    Lecture seule sur global_status() — pas de modif logique.
+    Returns None if no objectives are defined for the period.
+    """
+    if not global_status:
+        return None
+    total = global_status.get("total", 0) or 0
+    if total == 0:
+        return "Pas d'objectif défini pour cette période."
+
+    green = global_status.get("green", 0) or 0
+    orange = global_status.get("orange", 0) or 0
+    red = global_status.get("red", 0) or 0
+    excluded = global_status.get("excluded", 0) or 0
+    score_pct = global_status.get("score_pct")
+    top_alert = global_status.get("top_alert")
+
+    score_str = f"{int(round(score_pct))} %" if score_pct is not None else "—"
+    parts = [
+        f"Score : {green} / {total} atteints — {score_str}",
+        f"🟢 {green}  •  🟡 {orange}  •  🔴 {red}",
+    ]
+    if excluded > 0:
+        parts.append(f"({excluded} KPI{'s' if excluded > 1 else ''} hors comparaison)")
+
+    line = "   ·   ".join(parts)
+
+    if top_alert:
+        label = top_alert.get("label", "")
+        fmt = top_alert.get("format", "number")
+        value_str = _format_alert_value(top_alert.get("value"), fmt)
+        target_str = _format_alert_value(top_alert.get("target"), fmt)
+        pct = top_alert.get("pct_atteinte")
+        pct_str = f"{int(round(pct))} %" if pct is not None else "—"
+        line += f"\n⚠️ Plus en alerte : {label} — {value_str} vs objectif {target_str} ({pct_str} atteint)"
+
+    return line
+
+
 def _page_blocks(kpis: dict, week_start: date, week_end: date, meeting_date: Optional[date] = None) -> list:
     week_num_data = week_start.isocalendar()[1]
     start_str = week_start.strftime("%d/%m/%Y")
@@ -144,7 +197,14 @@ def _page_blocks(kpis: dict, week_start: date, week_end: date, meeting_date: Opt
     meeting_str = meeting_date.strftime("%d/%m/%Y") if meeting_date else ""
     benefice = kpis.get("benefice_net", {})
 
+    # Axe 1 : callout Score en haut de page (avant tout autre contenu)
+    score_text = _score_callout_text(kpis.get("global_status") or {})
+    score_callout: list = []
+    if score_text:
+        score_callout = [_callout(score_text, emoji="📊", color="gray_background")]
+
     blocks = [
+        *score_callout,
         # ── En-tête ──────────────────────────────────────────────────────────
         _callout(
             f"KPIs auto-générés depuis le dashboard S'investir · Données S{week_num_data} ({start_str} → {end_str})"

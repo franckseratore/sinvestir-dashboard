@@ -872,18 +872,21 @@ def global_status(period: Period) -> dict:
         except Exception:
             pass
 
-    # Bénéfice Net Paid (MTD, indépendant de la période — ne passe pas par _kpi_card())
+    # Bénéfice Net Paid sur la période active (ne passe pas par _kpi_card()).
+    # Avant : benefice_net_paid() forçait le MTD, créant un décalage critique sur le récap mensuel
+    # (ex. récap d'avril généré le 1er juin renvoyait le MTD de juin, ~0€). Désormais on utilise
+    # la période active pour cohérence avec tous les autres KPIs du global_status.
+    # Le target/seuil sont pro-ratés via _scale_target() pour cohérence avec les autres KPIs cumulatifs.
     try:
-        b = benefice_net_paid()
+        b = benefice_net_for_period(period.start, period.end)
         t = _get_target("benefice_net_paid")
-        b_target = t["target"] if t else None
-        b_seuil = t["seuil"] if t else None
+        b_target, b_seuil = _scale_target(t, period)
         b_sens = t["sens"] if t else None
         b_status = _status(b["benefice_net"], b_target, b_seuil, b_sens)
         b_pct, b_pct_status = _compute_pct_atteinte(b["benefice_net"], b_target, b_sens)
         all_kpis.append({
             "key": "benefice_net_paid",
-            "label": "Bénéfice Net Paid (MTD)",
+            "label": "Bénéfice Net Paid",
             "domain": "ads",
             "href": "/ads",
             "value": b["benefice_net"],

@@ -49,6 +49,8 @@ def compute_last_week() -> dict:
         "roas_paid":        kpi_module.roas_paid(p, comp),
         "budget_paid":      kpi_module.budget_paid(p, comp),
         "benefice_net":     kpi_module.benefice_net_paid(),
+        # Axe 1 : score & top alert sur la même période (lecture seule, pas de modif logique)
+        "global_status":    kpi_module.global_status(p),
     }
 
 
@@ -91,6 +93,83 @@ def _plain(label: str, value: str) -> str:
     return f"*{label}*\n{value}"
 
 
+def _format_alert_value(value, fmt: str) -> str:
+    """Format a top_alert value depending on its KPI format (currency / percent / number)."""
+    if value is None:
+        return "—"
+    if fmt == "currency":
+        return _fc(value)
+    if fmt == "percent":
+        return _fp(value)
+    if fmt == "number":
+        return _fn(value)
+    # ratio / 'x' format
+    return _fx(value)
+
+
+def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "") -> list:
+    """Build Slack Block Kit fragments for the 'Score de la semaine/du mois' header.
+
+    Lecture seule sur le résultat de global_status() — pas de modif logique.
+    Position attendue : tout en haut du récap (avant le header existant).
+    """
+    if not global_status:
+        return []
+
+    total = global_status.get("total", 0) or 0
+    green = global_status.get("green", 0) or 0
+    orange = global_status.get("orange", 0) or 0
+    red = global_status.get("red", 0) or 0
+    excluded = global_status.get("excluded", 0) or 0
+    score_pct = global_status.get("score_pct")
+    top_alert = global_status.get("top_alert")
+
+    blocks: list = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"📊 Score {period_label}", "emoji": True},
+        },
+    ]
+
+    if total > 0:
+        score_str = f"{int(round(score_pct))} %" if score_pct is not None else "—"
+        score_line = f"*{green} / {total} atteints* — {score_str}"
+        counts_line = f"🟢 {green}    🟡 {orange}    🔴 {red}"
+        if excluded > 0:
+            counts_line += f"    _( {excluded} KPI{'s' if excluded > 1 else ''} hors comparaison )_"
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"{score_line}\n{counts_line}"},
+        })
+    else:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "_Pas d'objectif défini pour cette période._"},
+        })
+
+    if top_alert:
+        label = top_alert.get("label", "")
+        href = top_alert.get("href", "")
+        value_str = _format_alert_value(top_alert.get("value"), top_alert.get("format", "number"))
+        target_str = _format_alert_value(top_alert.get("target"), top_alert.get("format", "number"))
+        pct = top_alert.get("pct_atteinte")
+        pct_str = f"{int(round(pct))} %" if pct is not None else "—"
+        link = f"<{dashboard_url}{href}|→ voir>" if dashboard_url and href else ""
+        alert_text = (
+            f"⚠️ *Plus en alerte : {label}*\n"
+            f"{value_str} vs objectif {target_str} ({pct_str} atteint)"
+        )
+        if link:
+            alert_text += f"   {link}"
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": alert_text},
+        })
+
+    blocks.append({"type": "divider"})
+    return blocks
+
+
 # ─── Slack Block Kit ─────────────────────────────────────────────────────────
 
 def build_slack_blocks(data: dict, dashboard_url: str = "", notion_url: str = "") -> dict:
@@ -108,7 +187,11 @@ def build_slack_blocks(data: dict, dashboard_url: str = "", notion_url: str = ""
     def plain_field(label, value):
         return {"type": "mrkdwn", "text": _plain(label, value)}
 
+    # Axe 1 : Score de la semaine en tête de récap
+    score_section = _score_blocks(data.get("global_status") or {}, "de la semaine", dashboard_url)
+
     blocks = [
+        *score_section,
         {
             "type": "header",
             "text": {"type": "plain_text", "text": f"📊 Revue hebdo S{week_num} — {s} → {e}", "emoji": True}
@@ -253,6 +336,8 @@ def compute_last_month() -> dict:
         "roas_paid":        kpi_module.roas_paid(p, comp),
         "budget_paid":      kpi_module.budget_paid(p, comp),
         "benefice_net":     kpi_module.benefice_net_for_period(first_day, last_day),
+        # Axe 1 : score & top alert sur la même période (lecture seule, pas de modif logique)
+        "global_status":    kpi_module.global_status(p),
     }
 
 
@@ -268,7 +353,11 @@ def build_slack_blocks_monthly(data: dict, dashboard_url: str = "") -> dict:
     def plain_field(label, value):
         return {"type": "mrkdwn", "text": _plain(label, value)}
 
+    # Axe 1 : Score du mois en tête de récap
+    score_section = _score_blocks(data.get("global_status") or {}, "du mois", dashboard_url)
+
     blocks = [
+        *score_section,
         {
             "type": "header",
             "text": {"type": "plain_text", "text": f"📅 Revue mensuelle — {month_label}", "emoji": True}

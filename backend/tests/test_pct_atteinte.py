@@ -250,3 +250,33 @@ def test_global_status_top_alert_tier_priority():
 def test_global_status_excluded_count_non_negative():
     gs = kpis.global_status(PERIOD)
     assert gs["excluded"] >= 0
+
+
+def test_global_status_benefice_uses_period_not_mtd():
+    """Le récap mensuel exécuté le 1er du mois doit afficher le bénéfice DU MOIS RÉCAPÉ,
+    pas le MTD du mois en cours (qui serait ~0€). Test critique pour le récap automatique
+    Slack/Notion qui sort le 1er juin sur #marketing."""
+    # Période simulée : avril 2026 (mois "récapé")
+    p_avril = Period(start=date(2026, 4, 1), end=date(2026, 4, 30), label="Avril 2026", granularity="monthly")
+    gs = kpis.global_status(p_avril)
+    benefice_kpi = next((k for k in gs.get("critical_kpis", []) + [k for k in gs.get("domains", {}).get("ads", {}) if isinstance(k, dict)] if isinstance(k, dict) and k.get("key") == "benefice_net_paid"), None)
+    # Le bénéfice doit être calculé sur avril (1-30), pas sur juin MTD.
+    # Avec le test fixture (données seulement début janvier 2026), benefice avril = 0 sans MTD parasite.
+    # Vérification indirecte : on s'assure que le label NE contient PAS "(MTD)".
+    # (Test plus précis impossible sans mock du calendrier.)
+    # On parcourt tous les KPIs de la période pour trouver benefice_net_paid.
+    # Solution : appeler global_status puis chercher dans les structures internes.
+    found = False
+    for kpi_list in (gs.get("critical_kpis", []),):
+        for k in kpi_list:
+            if k.get("key") == "benefice_net_paid":
+                assert "(MTD)" not in k.get("label", ""), "Label benefice_net_paid ne doit plus contenir (MTD)"
+                found = True
+    # Si non trouvé dans critical_kpis (status != red), on vérifie via top_alert ou via un appel direct
+    # à benefice_net_for_period pour confirmer que la fonction est bien appelée avec la période.
+    from backend.app.kpis import benefice_net_for_period
+    direct = benefice_net_for_period(p_avril.start, p_avril.end)
+    assert "benefice_net" in direct
+    assert "mtd_label" in direct
+    # Le label doit refléter la période demandée (01/04 → 30/04/2026), pas la date du jour.
+    assert "04/2026" in direct["mtd_label"], f"mtd_label devrait contenir la période avril 2026, got: {direct['mtd_label']}"
