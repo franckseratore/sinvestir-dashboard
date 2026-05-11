@@ -2,14 +2,49 @@
 
 ## Post-mortem semaine 12-16 mai
 
-### Rotation de la clé SA `vercel-proxy`
-La clé JSON du SA `vercel-proxy@sinvestir-dashboard-2026.iam.gserviceaccount.com` (utilisée par Vercel pour signer les OIDC tokens vers le backend Cloud Run) a transité via le presse-papier le 2026-05-11 lors de la mise en place initiale. Risque R3 du plan migration Vercel : la valeur peut résider temporairement dans des historiques shell ou dans la conversation Claude. Action : régénérer une nouvelle clé via `gcloud iam service-accounts keys create`, mettre à jour l'env var Vercel `GCP_SA_KEY_B64`, puis supprimer l'ancienne clé via `gcloud iam service-accounts keys delete`. ~5 min de boulot pour fermer la fenêtre d'exposition.
+### Solution pérenne d'accès dashboard pour l'équipe (priorité haute, bloquant lundi 18 mai)
+Cloudflare Tunnel mis en place le 11 mai à 15h comme solution temporaire après échec du sprint WIF (blocker : Vercel Hobby sans OIDC Federation + org policy GCP `iam.disableServiceAccountKeyCreation` et `iam.allowedPolicyMemberDomains`). Tunnel dépendant du Mac de Franck allumé + URL `*.trycloudflare.com` non stable entre redémarrages du tunnel. À résoudre la semaine du 12-16 mai. 3 options à arbitrer :
 
-### Évaluer migration Firebase Auth / Identity Platform pour SSO Google
-Alternative au pattern actuel "SA JSON key Vercel → OIDC Cloud Run + X-API-Key applicative". Avec Firebase Auth / GCP Identity Platform, l'utilisateur final s'authentifie directement via SSO Google (compte sinvestir.fr), le frontend reçoit un ID token utilisateur qu'il forward au backend. Avantages : pas de clé SA à protéger, audit par utilisateur, révocation par compte Google. Inconvénients : ~2h de setup, dépendance Firebase, changement du flow login (vs middleware password actuel). À évaluer en exploration la semaine du 12-16 mai sans déclencher une migration immédiate.
+**Option 1 : IAP Cloud Run + custom domain (recommandée pour pérennité, ~2-3h)**
+- Load Balancer + IAP devant Cloud Run, custom domain `dashboard.sinvestir.fr`
+- SSO Google natif, restreint au domaine `sinvestir.fr`
+- Coût ~16€/mois (Load Balancer)
+- Pas besoin de Mac allumé, totalement managé
+- Bonus : règle aussi la question du backend qui peut redevenir IAM-strict sans X-API-Key applicative
+
+**Option 2 : Firebase Hosting + Firebase Auth (~2h, gratuit)**
+- Frontend déployé sur Firebase Hosting
+- Firebase Auth pour SSO Google (domaine sinvestir.fr)
+- Refactor frontend pour intégrer Firebase SDK
+- Cohérent avec écosystème GCP
+
+**Option 3 : Upgrade Vercel Pro ($20/mois) + reprise du sprint WIF**
+- Reprendre le travail Phase 2 commencé le 11 mai (proxy Vercel + WIF GCP)
+- Sur Vercel Pro, OIDC Federation devient disponible → ExternalAccountClient + WIF Pool dans GCP
+- ~1-2h de boulot, code déjà partiellement écrit (proxy adapté pour Cloud Run, à pivoter de gcloud CLI vers ExternalAccountClient)
+- Estimé en termes d'effort : doc Vercel + GCP est claire (cf. session du 11 mai), confiance ~85 %
+
+### Rotation des secrets transités via la conversation Claude
+Trois valeurs sensibles ont transité par la conversation Claude le 2026-05-11 :
+- `BACKEND_API_KEY` (48 chars base64, env var Cloud Run + GitHub Secret)
+- Token Vercel (vcp_...) 24h scope Full Account — devrait être expiré naturellement le 12 mai matin
+- `AUTH_PASSWORD` frontend (`dashboardsinvestir2026!*`)
+
+Rotation recommandée après la revue de mardi 14h :
+- BACKEND_API_KEY : nouvelle valeur via `openssl rand -base64 36`, update GitHub Secret + Cloud Scheduler headers + redeploy backend + .env.local frontend
+- Token Vercel : déjà expiré, rien à faire si pas re-créé
+- AUTH_PASSWORD : nouvelle valeur, update GitHub Secret + .env.local frontend
+- Coût total ~10 min, à programmer la semaine du 12-16 mai
 
 ### Audit défense en profondeur X-API-Key + OIDC
-Actuellement le backend valide à la fois (a) un OIDC Bearer token issu par le SA `vercel-proxy` et (b) un header `X-API-Key` applicatif. Belt + suspenders volontaire pour la migration de ce soir. À auditer : est-ce que X-API-Key apporte une valeur réelle en plus d'OIDC, ou est-ce que c'est de la friction sans bénéfice ? Si redondant, simplifier en retirant la couche X-API-Key (et donc la dépendance `require_api_key` du router FastAPI). Si non redondant, documenter explicitement le modèle de menace dans `backend/app/auth_middleware.py`.
+Actuellement le backend valide à la fois (a) un OIDC Bearer token issu par l'identité de Franck (`franck@sinvestir.fr` → `domain:sinvestir.fr` → `run.invoker`) et (b) un header `X-API-Key` applicatif. Belt + suspenders volontaire pour la migration du 11 mai. À auditer : est-ce que X-API-Key apporte une valeur réelle en plus d'OIDC, ou est-ce que c'est de la friction sans bénéfice ? Si redondant, simplifier en retirant la couche X-API-Key (et donc la dépendance `require_api_key` du router FastAPI). Si non redondant, documenter explicitement le modèle de menace dans `backend/app/auth_middleware.py`.
+
+### Code Phase 2 (proxy Vercel) à arbitrer
+Le fichier `frontend/app/api/proxy/[...path]/route.ts` est actuellement en working tree (pas commité) avec deux variantes possibles :
+- **Variante actuelle (Cloudflare Tunnel)** : utilise `child_process.execFileSync('gcloud auth print-identity-token')` — tourne uniquement sur le Mac de Franck
+- **Variante WIF future (post Vercel Pro upgrade)** : utiliserait `ExternalAccountClient` de `google-auth-library` avec `getVercelOidcToken` du package `@vercel/oidc`
+
+Décision à prendre en post-mortem : laquelle on garde en main ? Probablement la variante WIF (plus propre, plus pérenne). Le code Cloudflare Tunnel peut rester un fichier séparé ou être supprimé une fois la solution pérenne déployée.
 
 ## Dette technique
 
