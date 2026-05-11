@@ -27,6 +27,10 @@ class Settings:
     GSHEETS_CREDS_B64: str = os.environ.get("GSHEETS_CREDS_B64", "")
     REFRESH_INTERVAL_SECS: int = int(os.environ.get("REFRESH_INTERVAL_SECS", 1800))
 
+    # Scheduler interne (asyncio) qui envoie les récaps hebdo/mensuels.
+    # Doit être désactivé en prod (Cloud Run, min-instances=0) au profit de Cloud Scheduler externe.
+    ENABLE_INTERNAL_SCHEDULER: bool = os.environ.get("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
+
     # ── Rapport hebdo ────────────────────────────────────────────────────────
     SLACK_WEBHOOK_URL: str = os.environ.get("SLACK_WEBHOOK_URL", "")
     DASHBOARD_URL: str = os.environ.get("DASHBOARD_URL", "")

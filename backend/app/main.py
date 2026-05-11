@@ -175,8 +175,13 @@ async def lifespan(app: FastAPI):
     external_task = asyncio.create_task(_external_on_startup())
     # Rebuild in background so the server starts immediately
     asyncio.create_task(asyncio.to_thread(_rebuild))
-    weekly_task = asyncio.create_task(_weekly_scheduler())
-    monthly_task = asyncio.create_task(_monthly_scheduler())
+    if settings.ENABLE_INTERNAL_SCHEDULER:
+        weekly_task = asyncio.create_task(_weekly_scheduler())
+        monthly_task = asyncio.create_task(_monthly_scheduler())
+    else:
+        weekly_task = None
+        monthly_task = None
+        log.info("internal_scheduler_disabled", reason="ENABLE_INTERNAL_SCHEDULER=false")
 
     # File watcher — only for Excel mode (targets file always watched)
     if not settings.use_gsheets:
@@ -190,6 +195,8 @@ async def lifespan(app: FastAPI):
     yield
 
     for task in (refresh_task, weekly_task, monthly_task, external_task):
+        if task is None:
+            continue
         task.cancel()
         try:
             await task

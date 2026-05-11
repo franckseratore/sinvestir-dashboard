@@ -2,6 +2,11 @@
 
 ## Dette technique
 
+### Sécurité : endpoints admin publics (priorité haute)
+Les endpoints `/api/admin/report/weekly` et `/api/admin/report/monthly` sur Cloud Run sont actuellement accessibles sans authentification (`--allow-unauthenticated` dans `.github/workflows/deploy-backend.yml`). N'importe qui qui découvre l'URL peut déclencher un spam Slack/Notion. Identifié le 2026-05-10 lors de la mise en place de Cloud Scheduler. À corriger dans la semaine du 12-16 mai. Solutions possibles :
+- Header partagé `X-Admin-Token` vérifié côté FastAPI (simple)
+- Auth Cloud Run IAM avec OIDC token côté Cloud Scheduler (plus propre, plus complexe)
+
 ### Responsive mobile (priorité basse)
 Le dashboard n'a pas de design responsive global. En viewport mobile (375-390 px), la sidebar gauche reste visible et écrase le contenu principal. Identifié le 2026-05-09 lors de l'implémentation de l'axe 1 (Comparaison KPIs vs Objectifs). Décision : ne pas traiter dans le sprint axe 1, le dashboard est utilisé à 95 %+ en desktop. À traiter dans un sprint dédié ou intégrer à l'axe 5 (refonte esthétique).
 
