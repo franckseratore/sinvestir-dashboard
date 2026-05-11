@@ -2,6 +2,13 @@
 
 ## Dette technique
 
+### Tests unitaires sur la génération d'URLs Slack/Notion (priorité moyenne)
+Aucun test unitaire ne couvre actuellement la construction des liens dans les récaps Slack et Notion. Le bug de duplication d'URL identifié le 2026-05-11 (deux fois `?period=last_week` concaténés) aurait été attrapé par un test basique. À ajouter dans la semaine du 12-16 mai. Tests proposés :
+- Footer Slack "Dashboard last week" doit produire `{base}/?period=last_week` exactement (pas de doublon)
+- Top alert link doit produire `{base}{href}?period=last_week` (avec gestion query si `href` contient déjà `?` ou `&`)
+- Notion "Lien reporting hebdo" doit produire `{base}/?period=last_week`
+- Idem pour le récap mensuel (`last_month`)
+
 ### Tests KPIs cassés depuis cf03f39 (priorité moyenne)
 4 tests rouges dans `backend/tests/test_kpis.py` après le commit `cf03f39` (« enrichissement récaps Slack/Notion avec bloc Score + fix bénéfice par période »). Identifiés le 2026-05-11 lors de la mise en place du flag `ENABLE_INTERNAL_SCHEDULER`. Pas bloquant pour le déploiement (la CI `test.yml` ne lance pas pytest), mais les tests doivent être réalignés. À traiter dans la semaine du 12-16 mai.
 

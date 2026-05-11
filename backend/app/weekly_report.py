@@ -107,11 +107,15 @@ def _format_alert_value(value, fmt: str) -> str:
     return _fx(value)
 
 
-def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "") -> list:
+def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "", period_filter: str = "") -> list:
     """Build Slack Block Kit fragments for the 'Score de la semaine/du mois' header.
 
     Lecture seule sur le résultat de global_status() — pas de modif logique.
     Position attendue : tout en haut du récap (avant le header existant).
+
+    `dashboard_url` doit être l'URL de base (sans query string). Si `period_filter`
+    est fourni, on append `?period=<period_filter>` au href du top_alert link
+    pour que le clic atterrisse sur la page filtrée sur la période du récap.
     """
     if not global_status:
         return []
@@ -154,7 +158,14 @@ def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "
         target_str = _format_alert_value(top_alert.get("target"), top_alert.get("format", "number"))
         pct = top_alert.get("pct_atteinte")
         pct_str = f"{int(round(pct))} %" if pct is not None else "—"
-        link = f"<{dashboard_url}{href}|→ voir>" if dashboard_url and href else ""
+        if dashboard_url and href:
+            if period_filter:
+                separator = "&" if "?" in href else "?"
+                link = f"<{dashboard_url}{href}{separator}period={period_filter}|→ voir>"
+            else:
+                link = f"<{dashboard_url}{href}|→ voir>"
+        else:
+            link = ""
         alert_text = (
             f"⚠️ *Plus en alerte : {label}*\n"
             f"{value_str} vs objectif {target_str} ({pct_str} atteint)"
@@ -172,7 +183,7 @@ def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "
 
 # ─── Slack Block Kit ─────────────────────────────────────────────────────────
 
-def build_slack_blocks(data: dict, dashboard_url: str = "", notion_url: str = "") -> dict:
+def build_slack_blocks(data: dict, dashboard_url: str = "", dashboard_url_filtered: str = "", notion_url: str = "") -> dict:
     week_start: date = data["week_start"]
     week_end: date = data["week_end"]
     week_num = week_start.isocalendar()[1]
@@ -188,7 +199,7 @@ def build_slack_blocks(data: dict, dashboard_url: str = "", notion_url: str = ""
         return {"type": "mrkdwn", "text": _plain(label, value)}
 
     # Axe 1 : Score de la semaine en tête de récap
-    score_section = _score_blocks(data.get("global_status") or {}, "de la semaine", dashboard_url)
+    score_section = _score_blocks(data.get("global_status") or {}, "de la semaine", dashboard_url, period_filter="last_week")
 
     blocks = [
         *score_section,
@@ -239,8 +250,8 @@ def build_slack_blocks(data: dict, dashboard_url: str = "", notion_url: str = ""
     ]
 
     links = []
-    if dashboard_url:
-        links.append(f"<{dashboard_url}/?period=last_week|→ Dashboard last week>")
+    if dashboard_url_filtered:
+        links.append(f"<{dashboard_url_filtered}|→ Dashboard last week>")
     if notion_url:
         links.append(f"<{notion_url}|→ Ouvrir la revue Notion>")
     if links:
@@ -275,7 +286,8 @@ def send_weekly_report() -> None:
     s = f"{week_start.day} {MONTH_FR_SHORT[week_start.month]}"
     e = f"{week_end.day} {MONTH_FR_SHORT[week_end.month]} {week_end.year}"
     data_period_label = f"S{week_num_data} ({s} → {e})"
-    dashboard_url = f"{settings.DASHBOARD_URL}/?period=last_week" if settings.DASHBOARD_URL else ""
+    dashboard_base = settings.DASHBOARD_URL.rstrip("/") if settings.DASHBOARD_URL else ""
+    dashboard_url_filtered = f"{dashboard_base}/?period=last_week" if dashboard_base else ""
 
     # ── Notion d'abord pour récupérer l'URL à inclure dans Slack ──────────
     notion_url = ""
@@ -290,7 +302,7 @@ def send_weekly_report() -> None:
                 meeting_date=tuesday,
                 data_period_label=data_period_label,
                 kpis=data,
-                dashboard_url=dashboard_url,
+                dashboard_url=dashboard_url_filtered,
             )
             log.info("weekly_report_notion", page_url=notion_url)
         except Exception as e:
@@ -300,7 +312,7 @@ def send_weekly_report() -> None:
 
     # ── Slack avec lien Notion ─────────────────────────────────────────────
     if settings.SLACK_WEBHOOK_URL:
-        payload = build_slack_blocks(data, dashboard_url, notion_url=notion_url)
+        payload = build_slack_blocks(data, dashboard_base, dashboard_url_filtered, notion_url=notion_url)
         ok = post_webhook(settings.SLACK_WEBHOOK_URL, payload)
         log.info("weekly_report_slack", sent=ok)
     else:
@@ -354,7 +366,7 @@ def build_slack_blocks_monthly(data: dict, dashboard_url: str = "") -> dict:
         return {"type": "mrkdwn", "text": _plain(label, value)}
 
     # Axe 1 : Score du mois en tête de récap
-    score_section = _score_blocks(data.get("global_status") or {}, "du mois", dashboard_url)
+    score_section = _score_blocks(data.get("global_status") or {}, "du mois", dashboard_url, period_filter="last_month")
 
     blocks = [
         *score_section,
