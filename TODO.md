@@ -1,5 +1,16 @@
 # TODO
 
+## Post-mortem semaine 12-16 mai
+
+### Rotation de la clé SA `vercel-proxy`
+La clé JSON du SA `vercel-proxy@sinvestir-dashboard-2026.iam.gserviceaccount.com` (utilisée par Vercel pour signer les OIDC tokens vers le backend Cloud Run) a transité via le presse-papier le 2026-05-11 lors de la mise en place initiale. Risque R3 du plan migration Vercel : la valeur peut résider temporairement dans des historiques shell ou dans la conversation Claude. Action : régénérer une nouvelle clé via `gcloud iam service-accounts keys create`, mettre à jour l'env var Vercel `GCP_SA_KEY_B64`, puis supprimer l'ancienne clé via `gcloud iam service-accounts keys delete`. ~5 min de boulot pour fermer la fenêtre d'exposition.
+
+### Évaluer migration Firebase Auth / Identity Platform pour SSO Google
+Alternative au pattern actuel "SA JSON key Vercel → OIDC Cloud Run + X-API-Key applicative". Avec Firebase Auth / GCP Identity Platform, l'utilisateur final s'authentifie directement via SSO Google (compte sinvestir.fr), le frontend reçoit un ID token utilisateur qu'il forward au backend. Avantages : pas de clé SA à protéger, audit par utilisateur, révocation par compte Google. Inconvénients : ~2h de setup, dépendance Firebase, changement du flow login (vs middleware password actuel). À évaluer en exploration la semaine du 12-16 mai sans déclencher une migration immédiate.
+
+### Audit défense en profondeur X-API-Key + OIDC
+Actuellement le backend valide à la fois (a) un OIDC Bearer token issu par le SA `vercel-proxy` et (b) un header `X-API-Key` applicatif. Belt + suspenders volontaire pour la migration de ce soir. À auditer : est-ce que X-API-Key apporte une valeur réelle en plus d'OIDC, ou est-ce que c'est de la friction sans bénéfice ? Si redondant, simplifier en retirant la couche X-API-Key (et donc la dépendance `require_api_key` du router FastAPI). Si non redondant, documenter explicitement le modèle de menace dans `backend/app/auth_middleware.py`.
+
 ## Dette technique
 
 ### Tests unitaires sur la génération d'URLs Slack/Notion (priorité moyenne)

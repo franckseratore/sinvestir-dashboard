@@ -31,6 +31,10 @@ class Settings:
     # Doit être désactivé en prod (Cloud Run, min-instances=0) au profit de Cloud Scheduler externe.
     ENABLE_INTERNAL_SCHEDULER: bool = os.environ.get("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
 
+    # Clé partagée vérifiée par auth_middleware.require_api_key.
+    # Vide en dev local → auth désactivée. Renseignée en prod via GitHub Secret BACKEND_API_KEY.
+    BACKEND_API_KEY: str = os.environ.get("BACKEND_API_KEY", "")
+
     # ── Rapport hebdo ────────────────────────────────────────────────────────
     SLACK_WEBHOOK_URL: str = os.environ.get("SLACK_WEBHOOK_URL", "")
     DASHBOARD_URL: str = os.environ.get("DASHBOARD_URL", "")

@@ -3,15 +3,16 @@ from datetime import date
 from typing import Optional
 
 import numpy as np
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from . import cache, kpis
+from .auth_middleware import require_api_key
 from .period_resolver import resolve, comparison_period
 from .source_classifier import get_unknown_sources
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 def _sanitize(obj):
