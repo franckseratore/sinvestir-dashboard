@@ -2,6 +2,16 @@
 
 ## Dette technique
 
+### Tests KPIs cassés depuis cf03f39 (priorité moyenne)
+4 tests rouges dans `backend/tests/test_kpis.py` après le commit `cf03f39` (« enrichissement récaps Slack/Notion avec bloc Score + fix bénéfice par période »). Identifiés le 2026-05-11 lors de la mise en place du flag `ENABLE_INTERNAL_SCHEDULER`. Pas bloquant pour le déploiement (la CI `test.yml` ne lance pas pytest), mais les tests doivent être réalignés. À traiter dans la semaine du 12-16 mai.
+
+Tests concernés et cause probable :
+- `test_benefice_net` : `TypeError` — la signature de `kpis.benefice_net()` a changé (nouveau paramètre ou retour différent suite au « fix bénéfice par période »).
+- `test_ca_by_produit` : `duckdb BinderException` — la query référence la colonne `produit_nom`, mais la table `ventes` expose `produit` (renommage non répercuté dans la query ou le test).
+- `test_no_show_rate` et `test_closing_rate` : assertions numériques fausses (0.0 attendu 0.25, 1.0 attendu 1.33) — probable changement de logique de calcul dans `kpis.py`.
+
+Action attendue : ouvrir chaque test, comparer aux nouvelles signatures/queries dans `backend/app/kpis.py`, et soit corriger le test (si le comportement métier a changé volontairement) soit corriger le code (si c'est une régression).
+
 ### Sécurité : endpoints admin publics (priorité haute)
 Les endpoints `/api/admin/report/weekly` et `/api/admin/report/monthly` sur Cloud Run sont actuellement accessibles sans authentification (`--allow-unauthenticated` dans `.github/workflows/deploy-backend.yml`). N'importe qui qui découvre l'URL peut déclencher un spam Slack/Notion. Identifié le 2026-05-10 lors de la mise en place de Cloud Scheduler. À corriger dans la semaine du 12-16 mai. Solutions possibles :
 - Header partagé `X-Admin-Token` vérifié côté FastAPI (simple)
