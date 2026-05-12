@@ -36,6 +36,7 @@ def create_weekly_entry(
     dashboard_url: str = "",
     meeting_date: Optional[date] = None,
     data_period_label: str = "",
+    mtd_kpis: Optional[dict] = None,
 ) -> str:
     """Create a page in the Revues hebdo database. Returns the page URL."""
     payload = {
@@ -51,7 +52,7 @@ def create_weekly_entry(
             **({"Lien reporting hebdo": {"url": dashboard_url}} if dashboard_url else {}),
             **({"Période analysée": {"rich_text": [{"text": {"content": data_period_label}}]}} if data_period_label else {}),
         },
-        "children": _page_blocks(kpis, week_start, week_end, meeting_date=meeting_date),
+        "children": _page_blocks(kpis, week_start, week_end, meeting_date=meeting_date, mtd_kpis=mtd_kpis),
     }
     result = _request("POST", "/pages", token, payload)
     return result.get("url", "")
@@ -190,7 +191,78 @@ def _score_callout_text(global_status: dict) -> Optional[str]:
     return line
 
 
-def _page_blocks(kpis: dict, week_start: date, week_end: date, meeting_date: Optional[date] = None) -> list:
+_MTD_ADDITIVE_LABELS = [
+    ("ca_ht",             "CA HT",        "currency"),
+    ("volume_leads",      "Leads",        "number"),
+    ("volume_leads_paid", "Leads paid",   "number"),
+    ("calls_completed",   "Calls passés", "number"),
+    ("budget_paid",       "Budget paid",  "currency"),
+]
+
+
+def _format_kpi_value(value, fmt: str) -> str:
+    if value is None:
+        return "—"
+    if fmt == "currency":
+        return _fc(value)
+    if fmt == "percent":
+        return _fp(value)
+    return _fn(value)
+
+
+def _mtd_pacing_blocks(mtd: dict) -> list:
+    """Section "Pacing du mois" insérée en tête du body pour la revue mardi."""
+    if not mtd:
+        return []
+    month_start = mtd.get("month_start")
+    month_end = mtd.get("month_end")
+    days_elapsed = mtd.get("days_elapsed")
+    days_in_month = mtd.get("days_in_month")
+    benefice = mtd.get("benefice_net", {}) or {}
+
+    bullets: list = []
+    for indicateur, label, fmt in _MTD_ADDITIVE_LABELS:
+        kpi = mtd.get(indicateur) or {}
+        em = _em(kpi.get("projection_status") or kpi.get("pct_status") or "")
+        mtd_str = _format_kpi_value(kpi.get("value"), fmt)
+        proj_str = _format_kpi_value(kpi.get("projection"), fmt)
+        target_str = _format_kpi_value(kpi.get("monthly_target"), fmt)
+        pct = kpi.get("projection_pct")
+        pct_str = f" — {int(round(pct))}% de l'objectif" if pct is not None else ""
+        bullets.append(_bullet(
+            f"{em} {label} : {mtd_str} MTD → ~{proj_str} fin de mois{pct_str} "
+            f"(objectif mensuel : {target_str})"
+        ))
+
+    rates_line = (
+        f"Booking {_fp((mtd.get('booking_rate') or {}).get('value'))}  ·  "
+        f"Closing net {_fp((mtd.get('closing_rate_net') or {}).get('value'))}  ·  "
+        f"No-show {_fp((mtd.get('no_show_rate') or {}).get('value'))}  ·  "
+        f"ACV {_fc((mtd.get('acv') or {}).get('value'))}  ·  "
+        f"CPL paid {_fc((mtd.get('cpl_paid') or {}).get('value'))}  ·  "
+        f"ROAS paid {_fx((mtd.get('roas_paid') or {}).get('value'))}"
+    )
+    benefice_label = benefice.get("mtd_label", "MTD")
+    benefice_line = f"Bénéfice net ({benefice_label}) : {_fc(benefice.get('benefice_net'), signed=True)}"
+
+    period_label = ""
+    if month_start and days_elapsed and days_in_month:
+        period_label = (
+            f"MTD au {month_end.strftime('%d/%m/%Y')} — jour {days_elapsed} / {days_in_month}. "
+            f"Projection = extrapolation linéaire."
+        )
+
+    return [
+        _h("📈 Pacing du mois — vue Matthieu / Mohammed"),
+        _para(period_label) if period_label else _para(""),
+        *bullets,
+        _para(f"Indicateurs de qualité (MTD) — {rates_line}", italic=False, color="default"),
+        _para(benefice_line, italic=False, color="default"),
+        _divider(),
+    ]
+
+
+def _page_blocks(kpis: dict, week_start: date, week_end: date, meeting_date: Optional[date] = None, mtd_kpis: Optional[dict] = None) -> list:
     week_num_data = week_start.isocalendar()[1]
     start_str = week_start.strftime("%d/%m/%Y")
     end_str = week_end.strftime("%d/%m/%Y")
@@ -212,11 +284,14 @@ def _page_blocks(kpis: dict, week_start: date, week_end: date, meeting_date: Opt
             emoji="📊",
         ),
         _callout(
-            "⏱ 45 min — Vue d'ensemble 10' · Sales 10' · Paid Media 10' · Roadmap 10' · Clôture 5'",
+            "⏱ 45 min — Pacing du mois 10' · Vue d'ensemble 10' · Sales 5' · Paid Media 5' · Roadmap 10' · Clôture 5'",
             emoji="⏱",
             color="blue_background",
         ),
         _divider(),
+
+        # ── Pacing du mois · 10 min (inséré pour la revue Matthieu/Mohammed) ─
+        *(_mtd_pacing_blocks(mtd_kpis) if mtd_kpis else []),
 
         # ── Vue d'ensemble · 10 min ──────────────────────────────────────────
         _h("📊 Vue d'ensemble · 10 min"),

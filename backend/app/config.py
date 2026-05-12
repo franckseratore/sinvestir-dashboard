@@ -35,8 +35,15 @@ class Settings:
     # Vide en dev local → auth désactivée. Renseignée en prod via GitHub Secret BACKEND_API_KEY.
     BACKEND_API_KEY: str = os.environ.get("BACKEND_API_KEY", "")
 
-    # ── Rapport hebdo ────────────────────────────────────────────────────────
+    # ── Rapports Slack ───────────────────────────────────────────────────────
+    # SLACK_WEBHOOK_URL : webhook vers #marketing — utilisé par le récap mensuel
+    # (1er du mois 9h). Audience large (toute l'équipe marketing).
     SLACK_WEBHOOK_URL: str = os.environ.get("SLACK_WEBHOOK_URL", "")
+    # SLACK_WEBHOOK_INTERNAL : webhook vers le DM/groupe privé Franck+Léo —
+    # utilisé par le récap hebdo (lundi 9h). Contient les perfs S vs S-1
+    # plus le pacing MTD avec projection fin de mois. Audience interne pour
+    # préparer la revue équipe du mardi.
+    SLACK_WEBHOOK_INTERNAL: str = os.environ.get("SLACK_WEBHOOK_INTERNAL", "")
     DASHBOARD_URL: str = os.environ.get("DASHBOARD_URL", "")
     # Notion — créer une intégration sur https://www.notion.so/profile/integrations
     # puis connecter l'intégration à la database "Revues hebdo équipe"

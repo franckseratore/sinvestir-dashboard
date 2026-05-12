@@ -1,11 +1,21 @@
 """
 Rapport hebdo automatique — chaque lundi 09h00 (Europe/Paris).
-Envoie un résumé Slack + crée une entrée Notion dans "Revues hebdo équipe".
+
+Audience: DM Slack interne Franck+Léo (env SLACK_WEBHOOK_INTERNAL). Préparation
+de la revue équipe du mardi avec Matthieu/Mohammed/Léo. Contenu en 2 sections :
+  1. Performances semaine passée vs semaine d'avant (S vs S-1)
+  2. Pacing du mois en cours (MTD + projection fin de mois)
+La page Notion correspondante est créée pour la réunion du mardi.
+
+Le récap mensuel (1er du mois 9h Paris) reste sur SLACK_WEBHOOK_URL → #marketing.
 """
+from calendar import monthrange
 from datetime import date, timedelta
+from typing import Optional, Tuple
 import structlog
 
 from . import kpis as kpi_module
+from .kpis import _get_target  # accès au target_mensuelle non-prorate pour la projection
 from .period_resolver import Period, comparison_period
 from .slack_client import post_webhook
 from .notion_api import create_weekly_entry
@@ -51,6 +61,93 @@ def compute_last_week() -> dict:
         "benefice_net":     kpi_module.benefice_net_paid(),
         # Axe 1 : score & top alert sur la même période (lecture seule, pas de modif logique)
         "global_status":    kpi_module.global_status(p),
+    }
+
+
+# ─── MTD + projection fin de mois ────────────────────────────────────────────
+
+# KPIs additifs : on peut extrapoler linéairement la valeur MTD jusqu'à la fin du mois.
+# Les KPIs de ratio (booking_rate, closing_rate, no_show, ACV, CPL, ROAS) ne se projettent
+# pas linéairement — on les affiche en MTD sans extrapolation.
+_ADDITIVE_KPIS = ("ca_ht", "volume_leads", "volume_leads_paid", "calls_completed", "budget_paid")
+
+
+def _projection_eom(value: Optional[float], today: date) -> Optional[float]:
+    """Extrapolation linéaire MTD → fin de mois : value * total_days / days_elapsed."""
+    if value is None:
+        return None
+    days_in_month = monthrange(today.year, today.month)[1]
+    days_elapsed = today.day
+    if days_elapsed <= 0:
+        return None
+    return value * days_in_month / days_elapsed
+
+
+def _projection_pct_atteinte(projection: Optional[float], monthly_target: Optional[float], sens: Optional[str]) -> Tuple[Optional[float], str]:
+    """Réutilise la logique de _compute_pct_atteinte mais sur projection vs target NON-prorata."""
+    if projection is None or monthly_target is None or monthly_target == 0 or not sens:
+        return None, "unknown"
+    if sens == "Haut":
+        pct = (projection / monthly_target) * 100
+    else:
+        pct = 999.0 if projection == 0 else (monthly_target / projection) * 100
+    pct = min(pct, 999.0)
+    if pct >= 100:
+        st = "green"
+    elif pct >= 80:
+        st = "orange"
+    else:
+        st = "red"
+    return round(pct, 1), st
+
+
+def compute_mtd_pacing() -> dict:
+    """Compute KPIs from 1st of month → today, with projection on additive KPIs.
+
+    Pour chaque KPI additif, on ajoute :
+      - projection : valeur extrapolée à la fin du mois courant
+      - monthly_target : target_mensuelle pleine (non prorata)
+      - projection_pct, projection_status : pacing vs target_mensuelle
+    """
+    today = date.today()
+    month_start = today.replace(day=1)
+    days_in_month = monthrange(today.year, today.month)[1]
+    p = Period(start=month_start, end=today, label="Mois en cours (MTD)", granularity="daily")
+
+    raw = {
+        "ca_ht":            kpi_module.ca_ht(p, None),
+        "volume_leads":     kpi_module.volume_leads(p, None),
+        "volume_leads_paid":kpi_module.volume_leads_paid(p, None),
+        "booking_rate":     kpi_module.booking_rate(p, None),
+        "closing_rate_net": kpi_module.closing_rate_net(p, None),
+        "no_show_rate":     kpi_module.no_show_rate(p, None),
+        "calls_completed":  kpi_module.calls_completed(p, None),
+        "acv":              kpi_module.acv(p, None),
+        "cpl_paid":         kpi_module.cpl_paid(p, None),
+        "roas_paid":        kpi_module.roas_paid(p, None),
+        "budget_paid":      kpi_module.budget_paid(p, None),
+        "benefice_net":     kpi_module.benefice_net_paid(),
+    }
+
+    for indicateur in _ADDITIVE_KPIS:
+        kpi = raw.get(indicateur) or {}
+        value = kpi.get("value")
+        projection = _projection_eom(value, today)
+        t = _get_target(indicateur) or {}
+        monthly_target = t.get("target")
+        sens = t.get("sens")
+        proj_pct, proj_st = _projection_pct_atteinte(projection, monthly_target, sens)
+        kpi["projection"] = round(projection, 2) if projection is not None else None
+        kpi["monthly_target"] = monthly_target
+        kpi["projection_pct"] = proj_pct
+        kpi["projection_status"] = proj_st
+
+    return {
+        "month_start":  month_start,
+        "month_end":    today,
+        "days_elapsed": today.day,
+        "days_in_month": days_in_month,
+        **raw,
     }
 
 
@@ -183,14 +280,49 @@ def _score_blocks(global_status: dict, period_label: str, dashboard_url: str = "
 
 # ─── Slack Block Kit ─────────────────────────────────────────────────────────
 
-def build_slack_blocks(data: dict, dashboard_url: str = "", dashboard_url_filtered: str = "", notion_url: str = "") -> dict:
-    week_start: date = data["week_start"]
-    week_end: date = data["week_end"]
+_KPI_FMT = {
+    "ca_ht":             ("CA HT",        "currency"),
+    "volume_leads":      ("Leads",        "number"),
+    "volume_leads_paid": ("Leads paid",   "number"),
+    "calls_completed":   ("Calls passés", "number"),
+    "budget_paid":       ("Budget paid",  "currency"),
+}
+
+
+def _format_value(value, fmt: str) -> str:
+    if value is None:
+        return "—"
+    if fmt == "currency":
+        return _fc(value)
+    if fmt == "percent":
+        return _fp(value)
+    return _fn(value)
+
+
+def _mtd_pacing_line(label: str, kpi: dict, fmt: str) -> str:
+    """One-line MTD pacing summary : `🟢 *CA HT* — 120k MTD → ~310k EoM (62% target)`."""
+    em = _em(kpi.get("projection_status") or kpi.get("pct_status") or "")
+    mtd_str = _format_value(kpi.get("value"), fmt)
+    proj_str = _format_value(kpi.get("projection"), fmt)
+    target_str = _format_value(kpi.get("monthly_target"), fmt)
+    pct = kpi.get("projection_pct")
+    pct_str = f" ({int(round(pct))}% target)" if pct is not None else ""
+    return f"{em} *{label}*\n{mtd_str} MTD → ~{proj_str} fin de mois{pct_str}\nObjectif mensuel : {target_str}"
+
+
+def build_slack_blocks(weekly: dict, mtd: dict, dashboard_url: str = "", dashboard_url_filtered: str = "", notion_url: str = "") -> dict:
+    """Build the Monday DM payload : 2 sections (S vs S-1 + MTD pacing)."""
+    week_start: date = weekly["week_start"]
+    week_end: date = weekly["week_end"]
     week_num = week_start.isocalendar()[1]
-    benefice = data["benefice_net"]
+    benefice_w = weekly["benefice_net"]
+    benefice_m = mtd["benefice_net"]
+    days_elapsed = mtd["days_elapsed"]
+    days_in_month = mtd["days_in_month"]
 
     s = f"{week_start.day} {MONTH_FR_SHORT[week_start.month]}"
     e = f"{week_end.day} {MONTH_FR_SHORT[week_end.month]} {week_end.year}"
+    month_label = f"{MONTH_FR[mtd['month_start'].month].capitalize()} {mtd['month_end'].year}"
 
     def field(label, kpi, fmt_fn):
         return {"type": "mrkdwn", "text": _line(label, kpi, fmt_fn)}
@@ -198,66 +330,94 @@ def build_slack_blocks(data: dict, dashboard_url: str = "", dashboard_url_filter
     def plain_field(label, value):
         return {"type": "mrkdwn", "text": _plain(label, value)}
 
-    # Axe 1 : Score de la semaine en tête de récap
-    score_section = _score_blocks(data.get("global_status") or {}, "de la semaine", dashboard_url, period_filter="last_week")
+    # Score header (lecture seule sur global_status hebdo)
+    score_section = _score_blocks(weekly.get("global_status") or {}, "de la semaine", dashboard_url, period_filter="last_week")
 
-    blocks = [
+    blocks: list = [
         *score_section,
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"📊 Revue hebdo S{week_num} — {s} → {e}", "emoji": True}
+            "text": {"type": "plain_text", "text": f"📊 Récap hebdo S{week_num} — {s} → {e}", "emoji": True},
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "Hello la team,\nvoici les performances de la semaine.\nJe vous laisse ajouter vos commentaires dans le Notion en prévision de notre point hebdo.\nBelle journée à tous :wave:"}
+            "text": {"type": "mrkdwn", "text": (
+                "Hello Léo,\n"
+                "voici les performances de la semaine passée (vs S-1) et où on en est sur le mois en cours.\n"
+                "On en discute mardi en revue équipe — la page Notion est dispo ci-dessous."
+            )},
         },
         {"type": "divider"},
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*Funnel complet*"}},
+
+        # ── Section 1 : S vs S-1 ─────────────────────────────────────────────
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*1️⃣ Performances semaine vs semaine d'avant*"}},
         {
             "type": "section",
             "fields": [
-                field("CA HT", data["ca_ht"], _fc),
-                field("Volume leads", data["volume_leads"], _fn),
-                field("Booking rate", data["booking_rate"], _fp),
-                field("Closing net", data["closing_rate_net"], _fp),
-            ]
+                field("CA HT", weekly["ca_ht"], _fc),
+                field("Volume leads", weekly["volume_leads"], _fn),
+                field("Booking rate", weekly["booking_rate"], _fp),
+                field("Closing net", weekly["closing_rate_net"], _fp),
+            ],
         },
-        {"type": "divider"},
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*Sales*"}},
         {
             "type": "section",
             "fields": [
-                field("Calls passés", data["calls_completed"], _fn),
-                field("No-show", data["no_show_rate"], _fp),
-                field("ACV", data["acv"], _fc),
-            ]
-        },
-        {"type": "divider"},
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*Paid Media*"}},
-        {
-            "type": "section",
-            "fields": [
-                plain_field("Budget", _fc(data["budget_paid"].get("value"))),
-                field("CPL", data["cpl_paid"], _fc),
-                field("ROAS", data["roas_paid"], _fx),
+                field("Calls passés", weekly["calls_completed"], _fn),
+                field("No-show", weekly["no_show_rate"], _fp),
+                field("ACV", weekly["acv"], _fc),
                 plain_field(
-                    f"Bénéfice net ({benefice.get('mtd_label', 'MTD')})",
-                    _fc(benefice.get("benefice_net"), signed=True)
+                    f"Bénéfice net ({benefice_w.get('mtd_label', 'MTD')})",
+                    _fc(benefice_w.get("benefice_net"), signed=True),
                 ),
-            ]
+            ],
         },
+        {
+            "type": "section",
+            "fields": [
+                plain_field("Budget paid", _fc(weekly["budget_paid"].get("value"))),
+                field("CPL paid", weekly["cpl_paid"], _fc),
+                field("ROAS paid", weekly["roas_paid"], _fx),
+            ],
+        },
+        {"type": "divider"},
+
+        # ── Section 2 : Pacing du mois (MTD + projection) ────────────────────
+        {"type": "section", "text": {"type": "mrkdwn", "text": (
+            f"*2️⃣ Pacing du mois — {month_label}*\n"
+            f"_MTD au jour {days_elapsed} / {days_in_month}. Projection = extrapolation linéaire._"
+        )}},
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": _mtd_pacing_line(label, mtd[k], fmt)}
+                for k, (label, fmt) in _KPI_FMT.items()
+            ],
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": (
+            "*Indicateurs de qualité (MTD, pas de projection linéaire)*\n"
+            f"Booking {_fp(mtd['booking_rate'].get('value'))}  ·  "
+            f"Closing net {_fp(mtd['closing_rate_net'].get('value'))}  ·  "
+            f"No-show {_fp(mtd['no_show_rate'].get('value'))}  ·  "
+            f"ACV {_fc(mtd['acv'].get('value'))}  ·  "
+            f"CPL paid {_fc(mtd['cpl_paid'].get('value'))}  ·  "
+            f"ROAS paid {_fx(mtd['roas_paid'].get('value'))}\n"
+            f"Bénéfice net ({benefice_m.get('mtd_label', 'MTD')}) : {_fc(benefice_m.get('benefice_net'), signed=True)}"
+        )}},
         {"type": "divider"},
     ]
 
     links = []
     if dashboard_url_filtered:
-        links.append(f"<{dashboard_url_filtered}|→ Dashboard last week>")
+        links.append(f"<{dashboard_url_filtered}|→ Dashboard semaine dernière>")
+    if dashboard_url:
+        links.append(f"<{dashboard_url}/?period=this_month|→ Dashboard mois en cours>")
     if notion_url:
-        links.append(f"<{notion_url}|→ Ouvrir la revue Notion>")
+        links.append(f"<{notion_url}|→ Page Notion de la revue mardi>")
     if links:
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "  ".join(links)}
+            "text": {"type": "mrkdwn", "text": "  ".join(links)},
         })
 
     return {"blocks": blocks}
@@ -270,9 +430,10 @@ def send_weekly_report() -> None:
 
     log.info("weekly_report_start")
 
-    data = compute_last_week()
-    week_start: date = data["week_start"]
-    week_end: date = data["week_end"]
+    weekly = compute_last_week()
+    mtd = compute_mtd_pacing()
+    week_start: date = weekly["week_start"]
+    week_end: date = weekly["week_end"]
 
     # Mardi de la semaine courante — robuste peu importe le jour d'appel
     today = date.today()
@@ -301,7 +462,8 @@ def send_weekly_report() -> None:
                 week_end=tuesday,
                 meeting_date=tuesday,
                 data_period_label=data_period_label,
-                kpis=data,
+                kpis=weekly,
+                mtd_kpis=mtd,
                 dashboard_url=dashboard_url_filtered,
             )
             log.info("weekly_report_notion", page_url=notion_url)
@@ -310,13 +472,17 @@ def send_weekly_report() -> None:
     else:
         log.warning("weekly_report_notion_skipped", reason="NOTION_API_KEY or DB_ID not set")
 
-    # ── Slack avec lien Notion ─────────────────────────────────────────────
-    if settings.SLACK_WEBHOOK_URL:
-        payload = build_slack_blocks(data, dashboard_base, dashboard_url_filtered, notion_url=notion_url)
-        ok = post_webhook(settings.SLACK_WEBHOOK_URL, payload)
-        log.info("weekly_report_slack", sent=ok)
+    # ── Slack DM Franck+Léo (webhook interne) ─────────────────────────────
+    # Le webhook public marketing (SLACK_WEBHOOK_URL) reste réservé au récap
+    # mensuel. Si SLACK_WEBHOOK_INTERNAL n'est pas défini, on ne tombe PAS en
+    # fallback sur le webhook public — préfère un silence visible (warning logs)
+    # à un envoi accidentel dans #marketing.
+    if settings.SLACK_WEBHOOK_INTERNAL:
+        payload = build_slack_blocks(weekly, mtd, dashboard_base, dashboard_url_filtered, notion_url=notion_url)
+        ok = post_webhook(settings.SLACK_WEBHOOK_INTERNAL, payload)
+        log.info("weekly_report_slack", sent=ok, target="internal_dm")
     else:
-        log.warning("weekly_report_slack_skipped", reason="SLACK_WEBHOOK_URL not set")
+        log.warning("weekly_report_slack_skipped", reason="SLACK_WEBHOOK_INTERNAL not set")
 
     log.info("weekly_report_done")
 
