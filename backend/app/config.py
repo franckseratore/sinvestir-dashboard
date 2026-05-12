@@ -31,9 +31,18 @@ class Settings:
     # Doit être désactivé en prod (Cloud Run, min-instances=0) au profit de Cloud Scheduler externe.
     ENABLE_INTERNAL_SCHEDULER: bool = os.environ.get("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
 
-    # Clé partagée vérifiée par auth_middleware.require_api_key.
+    # Clé partagée vérifiée par auth_middleware.require_auth (chemin legacy).
     # Vide en dev local → auth désactivée. Renseignée en prod via GitHub Secret BACKEND_API_KEY.
+    # Sera vidée à la fin de la migration Cloudflare Access (cf. TODO.md).
     BACKEND_API_KEY: str = os.environ.get("BACKEND_API_KEY", "")
+
+    # ── Cloudflare Access (mode cible) ───────────────────────────────────────
+    # CF_ACCESS_TEAM_DOMAIN : ton équipe Cloudflare Zero Trust, ex. `sinvestir.cloudflareaccess.com`.
+    # CF_ACCESS_AUD : l'AUD tag de l'application CF Access protégeant l'API, copié
+    # depuis Zero Trust > Access > Applications > ton app > Audience tag.
+    # Tant que les deux sont vides → check JWT skippé, le middleware retombe sur X-API-Key.
+    CF_ACCESS_TEAM_DOMAIN: str = os.environ.get("CF_ACCESS_TEAM_DOMAIN", "")
+    CF_ACCESS_AUD: str = os.environ.get("CF_ACCESS_AUD", "")
 
     # ── Rapports Slack ───────────────────────────────────────────────────────
     # SLACK_WEBHOOK_URL : webhook vers #marketing — utilisé par le récap mensuel

@@ -8,11 +8,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from . import cache, kpis
-from .auth_middleware import require_api_key
+from .auth_middleware import require_auth
 from .period_resolver import resolve, comparison_period
 from .source_classifier import get_unknown_sources
 
-router = APIRouter(dependencies=[Depends(require_api_key)])
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 def _sanitize(obj):
