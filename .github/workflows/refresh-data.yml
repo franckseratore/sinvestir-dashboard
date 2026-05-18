@@ -48,6 +48,7 @@ jobs:
             pandas==2.2.2 \
             'gspread>=6.0' \
             'google-auth>=2.0' \
+            python-dotenv \
             structlog
 
       - name: Run refresh
