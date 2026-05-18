@@ -177,6 +177,14 @@ export type GlobalStatusData = {
   top_alert: TopAlert | null
 }
 
+export type ReconciliationData = {
+  period: PeriodMeta
+  sheets: { ventes: number; ca: number }
+  iclosed: { ventes: number; ca: number }
+  delta_ventes: number
+  delta_ca: number
+}
+
 type ApiParams = { period: string; compare?: boolean; start?: string; end?: string }
 
 export const api = {
@@ -188,6 +196,7 @@ export const api = {
   iclosed: (p: ApiParams) => get<IClosedData>('/api/iclosed', p as Record<string, string | boolean | undefined>),
   status: () => get<StatusData>('/api/status', {}),
   globalStatus: (p: Omit<ApiParams, 'compare'>) => get<GlobalStatusData>('/api/global-status', p as Record<string, string | boolean | undefined>),
+  reconciliation: (p: Omit<ApiParams, 'compare'>) => get<ReconciliationData>('/api/reconciliation', p as Record<string, string | boolean | undefined>),
   adminTargets: () => get<TargetRow[]>('/api/admin/targets', {}),
   updateTarget: async (indicateur: string, body: TargetUpdate): Promise<void> => {
     await fetch(`${BASE}/api/admin/targets/${indicateur}`, {

@@ -51,6 +51,7 @@ import {
   chartBudgetCaRoas,
   creativesTable,
   beneficeNetPaid,
+  reconciliation,
 } from './lib/tables'
 import {
   openRate,
@@ -374,6 +375,20 @@ app.get('/api/iclosed', async (c) => {
       outcomes_breakdown: outcomes,
       chart_revenue: chartRev,
     })
+  } catch (err: unknown) {
+    return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)
+  }
+})
+
+// ─── /api/reconciliation ────────────────────────────────────────────────────
+// Compare Sales (Google Sheets, officiel) vs Sales Live (iClosed) sur une période.
+
+app.get('/api/reconciliation', async (c) => {
+  const sql = c.get('sql')
+  const { p } = parsePeriod(c)
+  try {
+    const r = await reconciliation(sql, p)
+    return c.json({ period: periodMeta(p), ...r })
   } catch (err: unknown) {
     return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)
   }

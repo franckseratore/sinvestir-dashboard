@@ -1,7 +1,7 @@
 'use client'
 import { useQueryState } from 'nuqs'
 import { useApi } from '@/hooks/use-api'
-import { api, type OverviewData, type GlobalStatusData } from '@/lib/api'
+import { api, type OverviewData, type GlobalStatusData, type ReconciliationData } from '@/lib/api'
 import { KpiCard } from '@/components/kpi-card'
 import { HeroKpiCard } from '@/components/hero-kpi-card'
 import { ScoreWidget } from '@/components/score-widget'
@@ -20,6 +20,52 @@ import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import type { ColumnDef } from '@tanstack/react-table'
 import Link from 'next/link'
+
+// ── Reconciliation Sales (officiel) vs Sales Live (live) ────────────────────
+function ReconciliationWidget({ data }: { data: ReconciliationData }) {
+  const { sheets, iclosed, delta_ventes, delta_ca } = data
+  // Tolérance : Sheets > iClosed est l'écart "normal" (saisie a posteriori).
+  // Au-delà de 30% de delta_ca ou si iClosed > Sheets, on flag en orange.
+  const ratio = sheets.ca > 0 ? Math.abs(delta_ca) / sheets.ca : 0
+  const reversed = iclosed.ca > sheets.ca
+  const warn = reversed || ratio > 0.3
+  const deltaColor = warn ? 'text-amber-600' : 'text-zinc-500'
+  const fmtCa = (v: number) => `${Math.round(v).toLocaleString('fr-FR')} €`
+  return (
+    <section className="rounded-xl border border-zinc-200 bg-white px-5 py-3">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-6 flex-wrap">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Sales (officiel · Sheets)</p>
+            <p className="text-sm font-semibold text-zinc-900 font-mono mt-0.5">{fmtCa(sheets.ca)} · {sheets.ventes} ventes</p>
+          </div>
+          <div className="text-zinc-300">vs</div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Sales Live (iClosed)</p>
+            <p className="text-sm font-semibold text-zinc-900 font-mono mt-0.5">{fmtCa(iclosed.ca)} · {iclosed.ventes} ventes</p>
+          </div>
+          <div className="text-zinc-300">→</div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Écart</p>
+            <p className={`text-sm font-semibold font-mono mt-0.5 ${deltaColor}`}>
+              {delta_ca >= 0 ? '+' : ''}{fmtCa(delta_ca)} · {delta_ventes >= 0 ? '+' : ''}{delta_ventes} ventes
+            </p>
+          </div>
+        </div>
+        <Link href="/sales" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+          Détail Sales <ExternalLink size={10} />
+        </Link>
+      </div>
+      {warn && (
+        <p className="text-[11px] text-amber-700 mt-2">
+          {reversed
+            ? '⚠️ iClosed > Sheets : inverse l\'écart habituel. Vérifier la consolidation Sheets.'
+            : `⚠️ Écart ${Math.round(ratio * 100)}% — anormal, à investiguer.`}
+        </p>
+      )}
+    </section>
+  )
+}
 
 // ── Consolidated critical alerts ─────────────────────────────────────────────
 function CriticalAlerts({ gs }: { gs: GlobalStatusData }) {
@@ -124,6 +170,10 @@ export default function OverviewPage() {
     () => api.globalStatus({ period: period ?? 'last_30_days', start: start || undefined, end: end || undefined }),
     [period, start, end],
   )
+  const { data: recon } = useApi<ReconciliationData>(
+    () => api.reconciliation({ period: period ?? 'last_30_days', start: start || undefined, end: end || undefined }),
+    [period, start, end],
+  )
 
   if (loading || !data) return <LoadingSkeleton />
 
@@ -150,6 +200,9 @@ export default function OverviewPage() {
 
       {/* Alertes consolidées — tous onglets */}
       {gs && <CriticalAlerts gs={gs} />}
+
+      {/* Réconciliation Sales (officiel) vs Sales Live (iClosed) */}
+      {recon && <ReconciliationWidget data={recon} />}
 
       {/* Niveau 2 — 3 Hero KPIs */}
       <div>

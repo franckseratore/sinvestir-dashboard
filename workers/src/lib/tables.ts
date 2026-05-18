@@ -495,6 +495,47 @@ export async function creativesTable(
   return out.sort((a, b) => b.spend - a.spend)
 }
 
+// ─── Réconciliation Sales (Google Sheets officiel) vs Sales Live (iClosed) ──
+
+export interface Reconciliation {
+  sheets: { ventes: number; ca: number }
+  iclosed: { ventes: number; ca: number }
+  delta_ventes: number
+  delta_ca: number
+}
+
+/**
+ * Compare la table `ventes` (source officielle Google Sheets, comptable) avec
+ * `ic_deals` filtrés sur transaction_type='WON' (source live iClosed) pour la
+ * même fenêtre temporelle. Les deux peuvent diverger : iClosed est saisi par
+ * les CSMs en quasi-temps réel, Sheets est consolidé a posteriori par le sales
+ * ops avec corrections (refunds, deposits requalifiés, etc.).
+ */
+export async function reconciliation(
+  sql: postgres.Sql,
+  p: Period,
+): Promise<Reconciliation> {
+  const [sRow] = await sql<Array<{ ventes: string | number; ca: string | number }>>`
+    SELECT COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca
+    FROM ventes WHERE date BETWEEN ${p.start} AND ${p.end}
+  `
+  const [iRow] = await sql<Array<{ ventes: string | number; ca: string | number }>>`
+    SELECT COUNT(*) AS ventes, COALESCE(SUM(value),0) AS ca
+    FROM ic_deals WHERE date BETWEEN ${p.start} AND ${p.end}
+      AND transaction_type = 'WON'
+  `
+  const sheetsVentes = Math.trunc(nf(sRow?.ventes))
+  const sheetsCa = Math.round(nf(sRow?.ca) * 100) / 100
+  const iclosedVentes = Math.trunc(nf(iRow?.ventes))
+  const iclosedCa = Math.round(nf(iRow?.ca) * 100) / 100
+  return {
+    sheets: { ventes: sheetsVentes, ca: sheetsCa },
+    iclosed: { ventes: iclosedVentes, ca: iclosedCa },
+    delta_ventes: sheetsVentes - iclosedVentes,
+    delta_ca: Math.round((sheetsCa - iclosedCa) * 100) / 100,
+  }
+}
+
 // ─── Bénéfice net Paid (logique métier non triviale) ────────────────────────
 
 export interface BeneficeNet {

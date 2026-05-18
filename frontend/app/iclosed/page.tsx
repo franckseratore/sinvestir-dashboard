@@ -182,7 +182,9 @@ function IClosedContent() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Sales Live</h1>
-          <p className="text-sm text-zinc-400 mt-0.5">iClosed — données temps réel</p>
+          <p className="text-sm text-zinc-400 mt-0.5">
+            Source : iClosed <span className="text-zinc-500 font-medium">(live)</span> — refresh horaire
+          </p>
         </div>
         <PeriodSelector />
       </div>

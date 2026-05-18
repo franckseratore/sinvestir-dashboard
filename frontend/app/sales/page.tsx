@@ -100,6 +100,9 @@ export default function SalesPage() {
         <div>
           <h1 className="text-2xl font-semibold text-brand">Sales</h1>
           <p className="text-sm text-zinc-500 mt-0.5">{data.period.label}</p>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Source : Google Sheets <span className="text-zinc-500 font-medium">(officiel)</span> — refresh quotidien 06h Paris
+          </p>
         </div>
         <PeriodSelector />
       </div>
