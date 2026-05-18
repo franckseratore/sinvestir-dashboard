@@ -344,21 +344,59 @@ export async function roasByCanal(
   sql: postgres.Sql,
   p: Period,
 ): Promise<Array<{ canal: string; budget: number; ca: number; leads: number; roas: number | null; cpl: number | null }>> {
-  const out: Array<{ canal: string; budget: number; ca: number; leads: number; roas: number | null; cpl: number | null }> = []
-  for (const canal of ['Google', 'Meta']) {
-    const b = nf((await sql<Array<{ v: string | number }>>`SELECT COALESCE(SUM(spend),0) AS v FROM budget WHERE date BETWEEN ${p.start} AND ${p.end} AND sous_canal = ${canal}`)[0]?.v)
-    const r = nf((await sql<Array<{ v: string | number }>>`SELECT COALESCE(SUM(ca_ht),0) AS v FROM ventes_paid WHERE date BETWEEN ${p.start} AND ${p.end} AND sous_canal = ${canal}`)[0]?.v)
-    const l = nf((await sql<Array<{ v: string | number }>>`SELECT COUNT(*) AS v FROM leads_paid WHERE date BETWEEN ${p.start} AND ${p.end} AND sous_canal = ${canal}`)[0]?.v)
-    out.push({
-      canal: `Paid/${canal}`,
-      budget: round2(b) ?? 0,
-      ca: round2(r) ?? 0,
-      leads: Math.trunc(l),
-      roas: b ? Math.round((r / b) * 100) / 100 : null,
-      cpl: l ? Math.round((b / l) * 100) / 100 : null,
-    })
+  // Itère sur TOUS les sous_canal présents dans budget OU ventes_paid OU leads_paid
+  // (au lieu d'un hard-code ['Google','Meta'] qui faisait disparaître le CA des
+  //  autres canaux et créait un écart inexpliqué avec la card "CA Paid" globale).
+  type Row = {
+    sous_canal: string | null
+    budget: number | string | null
+    ca: number | string | null
+    leads: number | string | null
   }
-  return out
+  const rows = await sql<Row[]>`
+    WITH b AS (
+      SELECT sous_canal, COALESCE(SUM(spend),0) AS budget FROM budget
+      WHERE date BETWEEN ${p.start} AND ${p.end} GROUP BY sous_canal
+    ),
+    v AS (
+      SELECT sous_canal, COALESCE(SUM(ca_ht),0) AS ca FROM ventes_paid
+      WHERE date BETWEEN ${p.start} AND ${p.end} GROUP BY sous_canal
+    ),
+    l AS (
+      SELECT sous_canal, COUNT(*) AS leads FROM leads_paid
+      WHERE date BETWEEN ${p.start} AND ${p.end} GROUP BY sous_canal
+    ),
+    keys AS (
+      SELECT sous_canal FROM b UNION SELECT sous_canal FROM v UNION SELECT sous_canal FROM l
+    )
+    SELECT k.sous_canal,
+           COALESCE(b.budget,0) AS budget,
+           COALESCE(v.ca,0)     AS ca,
+           COALESCE(l.leads,0)  AS leads
+    FROM keys k
+    LEFT JOIN b USING (sous_canal)
+    LEFT JOIN v USING (sous_canal)
+    LEFT JOIN l USING (sous_canal)
+  `
+  const out = rows.map((r) => {
+    const budget = nf(r.budget)
+    const ca = nf(r.ca)
+    const leads = Math.trunc(nf(r.leads))
+    const label = r.sous_canal ?? 'Inconnu'
+    return {
+      canal: `Paid/${label}`,
+      budget: round2(budget) ?? 0,
+      ca: round2(ca) ?? 0,
+      leads,
+      roas: budget ? Math.round((ca / budget) * 100) / 100 : null,
+      cpl: leads ? Math.round((budget / leads) * 100) / 100 : null,
+    }
+  })
+  // Trie : sous_canals avec spend > 0 d'abord (par CA desc), puis ceux sans spend
+  return out.sort((a, b) => {
+    if ((a.budget > 0) !== (b.budget > 0)) return b.budget > 0 ? 1 : -1
+    return b.ca - a.ca
+  })
 }
 
 export async function chartBudgetCaRoas(
