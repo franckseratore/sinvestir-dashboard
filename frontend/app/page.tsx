@@ -272,7 +272,18 @@ export default function OverviewPage() {
           <FunnelChart data={data.funnel} />
         </section>
         <section className="col-span-3 rounded-xl border border-zinc-200 bg-white p-6">
-          <h2 className="text-sm font-semibold text-zinc-700 mb-4">Top 5 sources par CA</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-zinc-700">Top 5 sources par CA</h2>
+            {data.unattributed && data.unattributed.count > 0 && (
+              <span
+                className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1"
+                title="Ventes dont la colonne source_initiale est NULL dans Sheets — à corriger côté ingestion / saisie"
+              >
+                ⚠️ {data.unattributed.count} ventes non attribuées —{' '}
+                {Math.round(data.unattributed.ca).toLocaleString('fr-FR')} € ({data.unattributed.pct_of_ca ?? '—'} % du CA)
+              </span>
+            )}
+          </div>
           <DataTable columns={sourceColumns} data={data.top_sources} exportFilename="top-sources" />
         </section>
       </div>

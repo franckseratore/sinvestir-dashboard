@@ -45,17 +45,41 @@ export async function funnel(sql: postgres.Sql, p: Period): Promise<Array<{ labe
 }
 
 export async function topSources(sql: postgres.Sql, p: Period, limit = 5): Promise<Array<{ source: string; canal: string; ventes: number; ca: number }>> {
-  const rows = await sql<Array<{ source: string; canal: string; ventes: string | number; ca: string | number }>>`
+  // NULL source_initiale = vente sans attribution. On le surface comme "Non attribué"
+  // pour que le CEO voie immédiatement le trou (vs un None silencieux dans la table).
+  const rows = await sql<Array<{ source: string | null; canal: string | null; ventes: string | number; ca: string | number }>>`
     SELECT source_initiale AS source, canal, COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca
     FROM ventes WHERE date BETWEEN ${p.start} AND ${p.end}
     GROUP BY source_initiale, canal ORDER BY ca DESC LIMIT ${limit}
   `
   return rows.map((r) => ({
-    source: r.source,
-    canal: r.canal,
+    source: r.source ?? 'Non attribué',
+    canal: r.canal ?? 'Inconnu',
     ventes: Math.trunc(nf(r.ventes)),
     ca: Math.round(nf(r.ca) * 100) / 100,
   }))
+}
+
+/**
+ * Ventes sans `source_initiale` sur la période — signal d'attribution cassée.
+ * Retourne le compte, le CA, et le % du CA total représenté par l'unattributed.
+ */
+export async function unattributedSales(
+  sql: postgres.Sql,
+  p: Period,
+): Promise<{ count: number; ca: number; pct_of_ca: number | null }> {
+  const [r] = await sql<Array<{ count: string | number; ca_unattr: string | number; ca_total: string | number }>>`
+    SELECT
+      COUNT(*) FILTER (WHERE source_initiale IS NULL) AS count,
+      COALESCE(SUM(ca_ht) FILTER (WHERE source_initiale IS NULL), 0) AS ca_unattr,
+      COALESCE(SUM(ca_ht), 0) AS ca_total
+    FROM ventes WHERE date BETWEEN ${p.start} AND ${p.end}
+  `
+  const count = Math.trunc(nf(r?.count))
+  const ca = Math.round(nf(r?.ca_unattr) * 100) / 100
+  const total = nf(r?.ca_total)
+  const pct = total > 0 ? Math.round((ca / total) * 1000) / 10 : null
+  return { count, ca, pct_of_ca: pct }
 }
 
 export async function chartCaSeries(

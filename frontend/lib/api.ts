@@ -55,6 +55,7 @@ export type OverviewData = {
   chart_ca: { date: string; value: number; comparison_value?: number }[]
   funnel: { label: string; value: number; pct: number | null }[]
   top_sources: { source: string; canal: string; ventes: number; ca: number }[]
+  unattributed: { count: number; ca: number; pct_of_ca: number | null }
 }
 
 export type MarketingData = {

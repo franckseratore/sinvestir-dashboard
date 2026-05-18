@@ -52,6 +52,7 @@ import {
   creativesTable,
   beneficeNetPaid,
   reconciliation,
+  unattributedSales,
 } from './lib/tables'
 import {
   openRate,
@@ -162,7 +163,7 @@ app.get('/api/overview', async (c) => {
   const sql = c.get('sql')
   const { p, comp } = parsePeriod(c)
   try {
-    const [ca, vl, br, cr, cpl, roas, ch, fn, top] = await Promise.all([
+    const [ca, vl, br, cr, cpl, roas, ch, fn, top, unattr] = await Promise.all([
       caHt(sql, p, comp),
       volumeLeads(sql, p, comp),
       bookingRate(sql, p, comp),
@@ -172,6 +173,7 @@ app.get('/api/overview', async (c) => {
       chartCaSeries(sql, p, comp),
       funnel(sql, p),
       topSources(sql, p),
+      unattributedSales(sql, p),
     ])
     return c.json({
       period: periodMeta(p),
@@ -180,6 +182,7 @@ app.get('/api/overview', async (c) => {
       chart_ca: ch,
       funnel: fn,
       top_sources: top,
+      unattributed: unattr,
     })
   } catch (err: unknown) {
     return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)
