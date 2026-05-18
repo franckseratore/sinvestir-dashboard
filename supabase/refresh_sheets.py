@@ -111,8 +111,10 @@ def main() -> None:
     ads_id = os.environ.get("GSHEETS_ADS_ID", "").strip()
     if not (stats_id and ads_id):
         sys.exit("ERREUR : GSHEETS_STATS_ID et GSHEETS_ADS_ID requis.")
-    if not os.environ.get("GSHEETS_CREDS_B64"):
-        sys.exit("ERREUR : GSHEETS_CREDS_B64 (service account JSON base64) requis.")
+    # Auth : soit GSHEETS_CREDS_B64 (one-shot local), soit GOOGLE_APPLICATION_CREDENTIALS
+    # posé par google-github-actions/auth (WIF en CI). Si aucun, on plante.
+    if not (os.environ.get("GSHEETS_CREDS_B64") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")):
+        sys.exit("ERREUR : GSHEETS_CREDS_B64 ou GOOGLE_APPLICATION_CREDENTIALS requis.")
 
     print(f"→ stats sheet ID : {stats_id}")
     print(f"→ ads sheet ID   : {ads_id}")
