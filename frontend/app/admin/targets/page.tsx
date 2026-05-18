@@ -64,7 +64,7 @@ export default function TargetsPage() {
     setRefreshing(true)
     setRefreshMsg('')
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/admin/refresh`, { method: 'POST' })
+      const res = await fetch('/api/proxy/api/admin/refresh', { method: 'POST' })
       const data = await res.json()
       setRefreshMsg(data.ok ? 'Données rechargées ✓' : `Erreur : ${data.error}`)
     } catch {

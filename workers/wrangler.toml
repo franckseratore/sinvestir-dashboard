@@ -1,0 +1,16 @@
+name = "sinvestir-dashboard-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-18"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets posés via `wrangler secret put` :
+#   - DATABASE_URL     : Postgres Supabase (mode session, port 5432)
+#   - BACKEND_API_KEY  : clé partagée avec le frontend pour le header X-API-Key
+#   - AC_API_URL       : URL ActiveCampaign (https://<acct>.api-us1.com)
+#   - AC_API_KEY       : token ActiveCampaign API
+#   - ICLOSED_API_KEY  : token iClosed API
+
+# Cron Triggers : refresh AC + iClosed toutes les heures.
+# Plan Workers Free = 10ms CPU/invocation. Si on dépasse, upgrade Paid ($5/mo, 30s CPU).
+[triggers]
+crons = ["0 * * * *"]

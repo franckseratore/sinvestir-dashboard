@@ -1,4 +1,7 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Toutes les requêtes passent par le proxy Vercel (server-side OIDC + X-API-Key).
+// Pour le dev local : `npm run dev` côté frontend + uvicorn backend → définir
+// BACKEND_URL=http://localhost:8000 dans `frontend/.env.local` et le proxy y forward.
+const BASE = '/api/proxy'
 
 async function get<T>(path: string, params: Record<string, string | boolean | undefined>): Promise<T> {
   const qs = Object.entries(params)

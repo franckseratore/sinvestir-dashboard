@@ -1,0 +1,60 @@
+name: Refresh dashboard data
+
+# Cron quotidien : tous les jours à 04:00 UTC (06:00 Paris CEST / 05:00 CET).
+# Refresh la donnée Google Sheets (ventes/calls/leads/ads/budget) vers Supabase.
+# La donnée externe (AC + iClosed) tourne sur un Cron Trigger Workers séparé (hourly).
+#
+# Auth Google = Workload Identity Federation (pas de clé JSON, l'org policy
+# `iam.disableServiceAccountKeyCreation` les bloque). Le SA impersonné
+# (`github-deploy@…`) doit avoir un accès Viewer sur les deux Sheets.
+#
+# Déclenchable manuellement via `gh workflow run refresh-data.yml` ou
+# l'onglet Actions de GitHub.
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write   # requis pour WIF (OIDC token GitHub)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+        # → pose GOOGLE_APPLICATION_CREDENTIALS pour que google.auth.default()
+        #   dans gsheets.py pick up les credentials WIF automatiquement.
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        run: |
+          pip install --quiet \
+            'psycopg[binary]>=3.2' \
+            pandas==2.2.2 \
+            'gspread>=6.0' \
+            'google-auth>=2.0' \
+            structlog
+
+      - name: Run refresh
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          GSHEETS_STATS_ID: ${{ secrets.GSHEETS_STATS_ID }}
+          GSHEETS_ADS_ID: ${{ secrets.GSHEETS_ADS_ID }}
+          # google-github-actions/auth@v2 a posé GOOGLE_APPLICATION_CREDENTIALS
+          # → gsheets.py tombe sur `google.auth.default()` qui le respecte.
+        run: python supabase/refresh_sheets.py
