@@ -6,7 +6,23 @@ import { TrendArrow } from './trend-arrow'
 import { Sparkline, sparklineColor } from './sparkline'
 import { PctBadge } from './pct-badge'
 import { Info } from 'lucide-react'
-import type { KpiCard as KpiCardData } from '@/lib/api'
+import type { KpiCard as KpiCardData, Pacing } from '@/lib/api'
+
+function PacingBadge({ pacing }: { pacing: Pacing }) {
+  const color =
+    pacing.status === 'green' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    : pacing.status === 'orange' ? 'bg-amber-50 text-amber-700 border-amber-200'
+    : pacing.status === 'red' ? 'bg-rose-50 text-rose-700 border-rose-200'
+    : 'bg-zinc-50 text-zinc-500 border-zinc-200'
+  return (
+    <span
+      className={cn('inline-flex items-center gap-1 text-[10px] font-medium border rounded-md px-1.5 py-0.5 self-start', color)}
+      title={`Atteint ${pacing.actual_pct.toFixed(1).replace('.', ',')}% du target mensuel · Période écoulée ${pacing.expected_pct.toFixed(1).replace('.', ',')}%`}
+    >
+      Pacing : {pacing.label}
+    </span>
+  )
+}
 
 interface KpiCardProps {
   title: string
@@ -74,6 +90,9 @@ export function KpiCard({ title, data, sens = 'Haut', className, tooltip }: KpiC
             )}
           </div>
           <PctBadge pct={data.pct_atteinte} pctStatus={data.pct_status} />
+          {data.pacing && (
+            <PacingBadge pacing={data.pacing} />
+          )}
         </div>
       ) : (
         <div className="text-[11px] text-zinc-400 italic">Pas d&apos;objectif</div>

@@ -15,6 +15,14 @@ export interface Target {
   prorata: boolean
 }
 
+export interface Pacing {
+  delta_pp: number    // delta en points de pourcentage (atteint − attendu_au_jour-du-mois)
+  status: StatusValue
+  label: string       // "en retard de X pts" / "à l'heure" / "en avance de X pts"
+  expected_pct: number
+  actual_pct: number
+}
+
 export interface KpiCard {
   value: number | null
   comparison_value: number | null
@@ -29,6 +37,7 @@ export interface KpiCard {
   format: KpiFormat
   sparkline: number[]
   moving_avg_4w: number | null
+  pacing: Pacing | null
 }
 
 export function safeDiv(num: number | null, den: number | null): number | null {
@@ -116,6 +125,83 @@ function round2(v: number | null): number | null {
   return Math.round(v * 100) / 100
 }
 
+/**
+ * Calcule le pacing d'un KPI cumulatif :
+ *   pacing = % atteint sur target mensuel − % du mois écoulé
+ *
+ * Ne s'applique qu'aux KPIs cumulatifs (Target.prorata = true) ET aux périodes
+ * qui couvrent le mois courant en cours (this_month / ytd inclus).
+ *
+ * - delta > 0   → "en avance"     (green)
+ * - delta ∈ [-10, 0]  → "à l'heure"  (orange si < 0, sinon green)
+ * - delta < -10 → "en retard"     (red)
+ *
+ * Pour sens=Bas (CPL, no_show), pacing n'est pas pertinent et on retourne null
+ * — ce sont des ratios qui ne s'accumulent pas avec le temps.
+ */
+export function computePacing(
+  value: number | null,
+  target: Target | null,
+  period: Period,
+  today: Date = new Date(),
+): Pacing | null {
+  if (!target || !target.prorata) return null
+  if (value === null) return null
+  if (target.sens === 'Bas') return null // CPL/no-show : pas de pacing
+  if (target.target <= 0) return null
+
+  const t = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+  const tIso = t.toISOString().slice(0, 10)
+
+  // Le pacing n'a de sens que si la période contient `today` (= cycle en cours)
+  if (period.start > tIso || period.end < tIso) return null
+
+  // Détermine la durée totale et écoulée du "cycle" en cours.
+  // - Pour this_month : cycle = mois courant complet, écoulé = today.day
+  // - Pour ytd        : cycle = année courante, écoulé = jour de l'année
+  // - Autres périodes "rolling" (last_30_days etc.) : on assume que la période
+  //   définie EST le cycle (start=début, end=today), totalDays = period.days
+  //   adapté à la durée canonique 30j → cycle de 30j en cours.
+  let totalDays: number
+  let elapsedDays: number
+  const startD = new Date(`${period.start}T00:00:00Z`)
+  const periodStartIsFirstOfMonth = startD.getUTCDate() === 1
+
+  if (periodStartIsFirstOfMonth && startD.getUTCMonth() === t.getUTCMonth() && startD.getUTCFullYear() === t.getUTCFullYear()) {
+    // this_month
+    totalDays = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate()
+    elapsedDays = t.getUTCDate()
+  } else if (startD.getUTCMonth() === 0 && startD.getUTCDate() === 1 && startD.getUTCFullYear() === t.getUTCFullYear()) {
+    // ytd
+    const startOfYear = new Date(Date.UTC(t.getUTCFullYear(), 0, 0))
+    elapsedDays = Math.round((t.getTime() - startOfYear.getTime()) / 86_400_000)
+    const endOfYear = new Date(Date.UTC(t.getUTCFullYear() + 1, 0, 0))
+    totalDays = Math.round((endOfYear.getTime() - startOfYear.getTime()) / 86_400_000)
+  } else {
+    // last_30_days, last_7_days, this_week, custom : assume cycle de period.days
+    totalDays = period.days
+    elapsedDays = period.days
+  }
+
+  const expectedPct = Math.round((elapsedDays / totalDays) * 1000) / 10
+  const actualPct = Math.round((value / target.target) * 1000) / 10
+  const deltaPp = Math.round((actualPct - expectedPct) * 10) / 10
+
+  let status: StatusValue
+  let label: string
+  if (deltaPp > 0) {
+    status = 'green'
+    label = `en avance de ${deltaPp.toFixed(1).replace('.', ',')} pts`
+  } else if (deltaPp >= -10) {
+    status = deltaPp >= -2 ? 'green' : 'orange'
+    label = deltaPp >= -2 ? 'à l\'heure' : `en retard de ${Math.abs(deltaPp).toFixed(1).replace('.', ',')} pts`
+  } else {
+    status = 'red'
+    label = `en retard de ${Math.abs(deltaPp).toFixed(1).replace('.', ',')} pts`
+  }
+  return { delta_pp: deltaPp, status, label, expected_pct: expectedPct, actual_pct: actualPct }
+}
+
 export async function buildKpiCard(
   sql: postgres.Sql,
   indicateur: string,
@@ -151,6 +237,8 @@ export async function buildKpiCard(
     sens,
   )
 
+  const pacing = computePacing(value, t, period)
+
   return {
     value: round2(value),
     comparison_value: round2(compValue),
@@ -165,6 +253,7 @@ export async function buildKpiCard(
     format: fmt,
     sparkline: options.sparkline ?? [],
     moving_avg_4w: round2(options.movingAvg4w ?? null),
+    pacing,
   }
 }
 

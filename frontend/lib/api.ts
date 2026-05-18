@@ -14,6 +14,14 @@ async function get<T>(path: string, params: Record<string, string | boolean | un
   return res.json()
 }
 
+export type Pacing = {
+  delta_pp: number
+  status: 'green' | 'orange' | 'red' | 'unknown'
+  label: string
+  expected_pct: number
+  actual_pct: number
+}
+
 export type KpiCard = {
   value: number | null
   comparison_value: number | null
@@ -28,6 +36,7 @@ export type KpiCard = {
   format: string
   sparkline: number[]
   moving_avg_4w: number | null
+  pacing: Pacing | null
 }
 
 export type TargetRow = {
