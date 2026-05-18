@@ -195,6 +195,28 @@ export type ReconciliationData = {
   delta_ca: number
 }
 
+export type FunnelBySourceRow = {
+  source: string
+  canal: string
+  sous_canal: string
+  leads: number
+  calls_booked: number
+  calls_completed: number
+  ventes: number
+  ca: number
+  booking_rate: number | null
+  show_rate: number | null
+  closing_rate: number | null
+  ca_per_lead: number | null
+  acv: number | null
+}
+
+export type FunnelBySourceData = {
+  period: PeriodMeta
+  rows: FunnelBySourceRow[]
+  unattributed: { leads_count: number; leads_pct: number | null; total_leads: number }
+}
+
 type ApiParams = { period: string; compare?: boolean; start?: string; end?: string }
 
 export const api = {
@@ -207,6 +229,7 @@ export const api = {
   status: () => get<StatusData>('/api/status', {}),
   globalStatus: (p: Omit<ApiParams, 'compare'>) => get<GlobalStatusData>('/api/global-status', p as Record<string, string | boolean | undefined>),
   reconciliation: (p: Omit<ApiParams, 'compare'>) => get<ReconciliationData>('/api/reconciliation', p as Record<string, string | boolean | undefined>),
+  funnelBySource: (p: Omit<ApiParams, 'compare'>) => get<FunnelBySourceData>('/api/funnel-by-source', p as Record<string, string | boolean | undefined>),
   adminTargets: () => get<TargetRow[]>('/api/admin/targets', {}),
   updateTarget: async (indicateur: string, body: TargetUpdate): Promise<void> => {
     await fetch(`${BASE}/api/admin/targets/${indicateur}`, {

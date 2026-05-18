@@ -53,6 +53,7 @@ import {
   beneficeNetPaid,
   reconciliation,
   unattributedSales,
+  funnelBySource,
 } from './lib/tables'
 import {
   openRate,
@@ -378,6 +379,19 @@ app.get('/api/iclosed', async (c) => {
       outcomes_breakdown: outcomes,
       chart_revenue: chartRev,
     })
+  } catch (err: unknown) {
+    return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)
+  }
+})
+
+// ─── /api/funnel-by-source ──────────────────────────────────────────────────
+
+app.get('/api/funnel-by-source', async (c) => {
+  const sql = c.get('sql')
+  const { p } = parsePeriod(c)
+  try {
+    const fbs = await funnelBySource(sql, p)
+    return c.json({ period: periodMeta(p), ...fbs })
   } catch (err: unknown) {
     return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)
   }

@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { BarChart3, TrendingUp, Users, Megaphone, LayoutDashboard, Mail, PhoneCall, Settings2 } from 'lucide-react'
+import { BarChart3, TrendingUp, Users, Megaphone, LayoutDashboard, Mail, PhoneCall, Settings2, GitBranch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DriveStatusDot } from './drive-status-bar'
 import { Suspense } from 'react'
@@ -10,6 +10,7 @@ const NAV = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/marketing', label: 'Marketing', icon: TrendingUp },
   { href: '/sales', label: 'Sales', icon: Users },
+  { href: '/funnel', label: 'Funnel', icon: GitBranch },
   { href: '/ads', label: 'Ads', icon: Megaphone },
   { href: '/email', label: 'Email', icon: Mail },
   { href: '/iclosed', label: 'Sales Live', icon: PhoneCall },

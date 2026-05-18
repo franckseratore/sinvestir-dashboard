@@ -519,6 +519,135 @@ export async function creativesTable(
   return out.sort((a, b) => b.spend - a.spend)
 }
 
+// ─── Funnel par source d'acquisition ────────────────────────────────────────
+
+export interface FunnelBySourceRow {
+  source: string
+  canal: string
+  sous_canal: string
+  leads: number
+  calls_booked: number
+  calls_completed: number
+  ventes: number
+  ca: number
+  booking_rate: number | null
+  show_rate: number | null
+  closing_rate: number | null
+  ca_per_lead: number | null
+  acv: number | null
+}
+
+export interface FunnelBySource {
+  rows: FunnelBySourceRow[]
+  unattributed: { leads_count: number; leads_pct: number | null; total_leads: number }
+}
+
+/**
+ * Funnel complet ventilé par source d'acquisition. Permet à Mohammed
+ * d'identifier en une vue les meilleures et pires sources sur les
+ * 5 dimensions clés (booking, show, closing, CA/lead, ACV).
+ *
+ * Jointure : `leads.source` ↔ `calls.source` ↔ `ventes.source_initiale`.
+ * Tri par CA desc. Sources sans CA (encore en pipeline) en bas.
+ */
+export async function funnelBySource(
+  sql: postgres.Sql,
+  p: Period,
+): Promise<FunnelBySource> {
+  type Row = {
+    source: string | null
+    canal: string | null
+    sous_canal: string | null
+    leads: string | number
+    calls_booked: string | number
+    calls_completed: string | number
+    ventes: string | number
+    ca: string | number
+  }
+  const rows = await sql<Row[]>`
+    WITH leads_agg AS (
+      SELECT source, MIN(canal) AS canal, MIN(sous_canal) AS sous_canal, COUNT(*) AS leads
+      FROM leads WHERE date BETWEEN ${p.start} AND ${p.end}
+      GROUP BY source
+    ),
+    calls_agg AS (
+      SELECT source,
+             MIN(canal) AS canal, MIN(sous_canal) AS sous_canal,
+             COUNT(*) AS calls_booked,
+             COUNT(*) FILTER (WHERE is_past) AS calls_completed
+      FROM calls WHERE date_reservation BETWEEN ${p.start} AND ${p.end}
+      GROUP BY source
+    ),
+    ventes_agg AS (
+      SELECT source_initiale AS source,
+             MIN(canal) AS canal, MIN(sous_canal) AS sous_canal,
+             COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca
+      FROM ventes WHERE date BETWEEN ${p.start} AND ${p.end}
+      GROUP BY source_initiale
+    ),
+    keys AS (
+      SELECT source FROM leads_agg
+      UNION SELECT source FROM calls_agg
+      UNION SELECT source FROM ventes_agg
+    )
+    SELECT k.source,
+           COALESCE(la.canal,  ca.canal,  va.canal)       AS canal,
+           COALESCE(la.sous_canal, ca.sous_canal, va.sous_canal) AS sous_canal,
+           COALESCE(la.leads, 0)            AS leads,
+           COALESCE(ca.calls_booked, 0)     AS calls_booked,
+           COALESCE(ca.calls_completed, 0)  AS calls_completed,
+           COALESCE(va.ventes, 0)           AS ventes,
+           COALESCE(va.ca, 0)               AS ca
+    FROM keys k
+    LEFT JOIN leads_agg  la ON k.source = la.source
+    LEFT JOIN calls_agg  ca ON k.source = ca.source
+    LEFT JOIN ventes_agg va ON k.source = va.source
+  `
+
+  const totalLeads = rows.reduce((acc, r) => acc + nf(r.leads), 0)
+  let unattributedLeads = 0
+
+  const out: FunnelBySourceRow[] = rows.map((r) => {
+    const source = r.source ?? '(non attribué)'
+    const leads = Math.trunc(nf(r.leads))
+    if (r.source === null) unattributedLeads += leads
+    const callsBooked = Math.trunc(nf(r.calls_booked))
+    const callsCompleted = Math.trunc(nf(r.calls_completed))
+    const ventes = Math.trunc(nf(r.ventes))
+    const ca = nf(r.ca)
+    return {
+      source,
+      canal: r.canal ?? 'Inconnu',
+      sous_canal: r.sous_canal ?? 'Inconnu',
+      leads,
+      calls_booked: callsBooked,
+      calls_completed: callsCompleted,
+      ventes,
+      ca: round2(ca) ?? 0,
+      booking_rate: leads ? Math.round((callsBooked / leads) * 1000) / 10 : null,
+      show_rate: callsBooked ? Math.round((callsCompleted / callsBooked) * 1000) / 10 : null,
+      closing_rate: callsCompleted ? Math.round((ventes / callsCompleted) * 1000) / 10 : null,
+      ca_per_lead: leads ? Math.round((ca / leads) * 100) / 100 : null,
+      acv: ventes ? Math.round((ca / ventes) * 100) / 100 : null,
+    }
+  })
+
+  // Tri : CA desc, puis leads desc (sources pipeline-only)
+  out.sort((a, b) => {
+    if (b.ca !== a.ca) return b.ca - a.ca
+    return b.leads - a.leads
+  })
+
+  return {
+    rows: out,
+    unattributed: {
+      leads_count: unattributedLeads,
+      leads_pct: totalLeads > 0 ? Math.round((unattributedLeads / totalLeads) * 1000) / 10 : null,
+      total_leads: totalLeads,
+    },
+  }
+}
+
 // ─── Réconciliation Sales (Google Sheets officiel) vs Sales Live (iClosed) ──
 
 export interface Reconciliation {
