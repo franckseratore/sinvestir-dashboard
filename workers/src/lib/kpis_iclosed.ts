@@ -6,7 +6,7 @@
  */
 import type postgres from 'postgres'
 import type { Period } from './period'
-import { getTarget, scaleTarget, statusOf, type StatusValue } from './kpi_helpers'
+import { buildKpiCard, getTarget, scaleTarget, statusOf, type KpiCard, type StatusValue } from './kpi_helpers'
 
 export interface IClosedKpi {
   value: number | null
@@ -93,6 +93,44 @@ export async function acvIc(sql: postgres.Sql, p: Period, comp: Period | null): 
   const { target: st, seuil: ss } = scaleTarget(t, p)
   const status = statusOf(val, st, ss, t?.sens ?? null)
   return { value: val, comparison_value: compVal, delta_pct: deltaPct(val, compVal), status }
+}
+
+async function outcomeRate(
+  sql: postgres.Sql,
+  outcome: string,
+  start: string,
+  end: string,
+): Promise<number | null> {
+  const rows = await sql<Array<{ rate: number | null }>>`
+    SELECT COUNT(*) FILTER (WHERE outcome = ${outcome})::float
+         / NULLIF(COUNT(*) FILTER (WHERE outcome IS NOT NULL), 0) AS rate
+    FROM ic_calls WHERE date BETWEEN ${start} AND ${end}
+  `
+  return nf(rows[0]?.rate)
+}
+
+/**
+ * Taux générique iClosed (annulation / disqualification) renvoyé en KpiCard
+ * complet pour s'intégrer aux autres cards de l'onglet Sales.
+ */
+async function outcomeRateCard(
+  sql: postgres.Sql,
+  indicateur: string,
+  outcome: string,
+  p: Period,
+  comp: Period | null,
+): Promise<KpiCard> {
+  const val = await outcomeRate(sql, outcome, p.start, p.end)
+  const cval = comp ? await outcomeRate(sql, outcome, comp.start, comp.end) : null
+  return buildKpiCard(sql, indicateur, val, cval, p, 'percent')
+}
+
+export async function cancellationRateIc(sql: postgres.Sql, p: Period, comp: Period | null): Promise<KpiCard> {
+  return outcomeRateCard(sql, 'cancellation_rate', 'CANCELLED', p, comp)
+}
+
+export async function disqualificationRateIc(sql: postgres.Sql, p: Period, comp: Period | null): Promise<KpiCard> {
+  return outcomeRateCard(sql, 'disqualification_rate', 'DISQUALIFIED', p, comp)
 }
 
 export async function ventesCountIc(sql: postgres.Sql, p: Period, comp: Period | null): Promise<IClosedKpi> {

@@ -275,10 +275,41 @@ export async function closersTable(
   return out.sort((a, b) => b.ca - a.ca)
 }
 
+interface ClosingCanalRowRaw {
+  ventes: string | number
+  calls: string | number
+  ca: string | number
+}
+
+function buildClosingCanalRow(r: ClosingCanalRowRaw): {
+  calls: number
+  ventes: number
+  closing_rate: number | null
+  ventes_hors_call: number
+  data_inconsistent: boolean
+  ca: number
+} {
+  const sales = Math.trunc(nf(r.ventes))
+  const calls = Math.trunc(nf(r.calls))
+  // Ventes attribuées au groupe sans call passé correspondant dans la période :
+  // soit le call est antérieur à la période, soit la vente s'est faite hors-call.
+  const ventesHorsCall = Math.max(0, sales - calls)
+  const rawRate = calls ? (sales / calls) * 100 : null
+  const cappedRate = rawRate !== null ? Math.min(rawRate, 100) : null
+  return {
+    calls,
+    ventes: sales,
+    closing_rate: cappedRate !== null ? Math.round(cappedRate * 10) / 10 : null,
+    ventes_hors_call: ventesHorsCall,
+    data_inconsistent: rawRate !== null && rawRate > 100,
+    ca: Math.round(nf(r.ca) * 100) / 100,
+  }
+}
+
 export async function closingRateByCanal(
   sql: postgres.Sql,
   p: Period,
-): Promise<Array<{ canal: string; calls: number; ventes: number; closing_rate: number | null; ca: number }>> {
+): Promise<Array<{ canal: string; calls: number; ventes: number; closing_rate: number | null; ventes_hors_call: number; data_inconsistent: boolean; ca: number }>> {
   const rows = await sql<Array<{ canal: string | null; calls: string | number; ventes: string | number; ca: string | number }>>`
     WITH s AS (
       SELECT canal, COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca FROM ventes
@@ -293,24 +324,62 @@ export async function closingRateByCanal(
     FROM keys k LEFT JOIN s USING (canal) LEFT JOIN c USING (canal)
   `
   return rows
-    .map((r) => {
-      const sales = Math.trunc(nf(r.ventes))
-      const calls = Math.trunc(nf(r.calls))
-      return {
-        canal: r.canal ?? 'Inconnu',
-        calls,
-        ventes: sales,
-        closing_rate: calls ? Math.round((sales / calls) * 1000) / 10 : null,
-        ca: Math.round(nf(r.ca) * 100) / 100,
-      }
-    })
+    .map((r) => ({ canal: r.canal ?? 'Inconnu', ...buildClosingCanalRow(r) }))
     .sort((a, b) => b.ca - a.ca)
+}
+
+/**
+ * Closing rate brut groupé par (canal, sous_canal) — un cran sous le canal principal.
+ * Utilisé pour le drill-down dépliable de l'onglet Sales.
+ */
+export async function closingRateByCanalDetail(
+  sql: postgres.Sql,
+  p: Period,
+): Promise<Array<{ canal: string; sous_canal: string; calls: number; ventes: number; closing_rate: number | null; ventes_hors_call: number; data_inconsistent: boolean; ca: number }>> {
+  const rows = await sql<Array<{ canal: string | null; sous_canal: string | null; calls: string | number; ventes: string | number; ca: string | number }>>`
+    WITH s AS (
+      SELECT canal, sous_canal, COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca FROM ventes
+      WHERE date BETWEEN ${p.start} AND ${p.end} GROUP BY canal, sous_canal
+    ),
+    c AS (
+      SELECT canal, sous_canal, COUNT(*) AS calls FROM calls
+      WHERE date_reservation BETWEEN ${p.start} AND ${p.end} AND is_past = TRUE GROUP BY canal, sous_canal
+    ),
+    keys AS (
+      SELECT canal, sous_canal FROM s UNION SELECT canal, sous_canal FROM c
+    )
+    SELECT k.canal, k.sous_canal,
+           COALESCE(c.calls,0) AS calls,
+           COALESCE(s.ventes,0) AS ventes,
+           COALESCE(s.ca,0) AS ca
+    FROM keys k LEFT JOIN s USING (canal, sous_canal) LEFT JOIN c USING (canal, sous_canal)
+  `
+  return rows
+    .map((r) => ({
+      canal: r.canal ?? 'Inconnu',
+      sous_canal: r.sous_canal ?? 'Inconnu',
+      ...buildClosingCanalRow(r),
+    }))
+    .sort((a, b) => b.ca - a.ca)
+}
+
+type ProduitGroup = 'LBD' | 'APP' | null
+
+function produitGroup(nom: string | null): ProduitGroup {
+  // LBD = toutes variantes/upsells de 'la bourse démocratisée' (accents/casse tolérés).
+  // APP = S'investir Conseil (insensible casse, match 'conseil').
+  if (!nom) return null
+  const n = nom.toLowerCase()
+  const normalized = n.replace(/é/g, 'e')
+  if (n.includes('bourse') && (normalized.includes('democratis') || n.includes('démocratis'))) return 'LBD'
+  if (n.includes('conseil')) return 'APP'
+  return null
 }
 
 export async function caByProduit(
   sql: postgres.Sql,
   p: Period,
-): Promise<Array<{ produit: string; ventes: number; ca: number; acv: number | null }>> {
+): Promise<Array<{ produit: string; group: ProduitGroup; ventes: number; ca: number; acv: number | null }>> {
   const rows = await sql<Array<{ produit_nom: string | null; ventes: string | number; ca: string | number }>>`
     SELECT produit_nom, COUNT(*) AS ventes, COALESCE(SUM(ca_ht),0) AS ca
     FROM ventes WHERE date BETWEEN ${p.start} AND ${p.end}
@@ -321,11 +390,53 @@ export async function caByProduit(
     const ca = nf(r.ca)
     return {
       produit: r.produit_nom ?? 'Inconnu',
+      group: produitGroup(r.produit_nom),
       ventes,
       ca: Math.round(ca * 100) / 100,
       acv: ventes ? Math.round((ca / ventes) * 100) / 100 : null,
     }
   })
+}
+
+export interface CaLbdAppBreakdown {
+  total_ca: number
+  total_ventes: number
+  lbd: { ca: number; ventes: number }
+  app: { ca: number; ventes: number }
+  autres: { ca: number; ventes: number }
+  ecart: number
+}
+
+/**
+ * Décompose le CA HT total entre LBD, APP (S'investir Conseil) et reste.
+ * L'écart = CA total − (LBD + APP) signale du CA hors-périmètre à flagguer.
+ */
+export async function caLbdAppBreakdown(sql: postgres.Sql, p: Period): Promise<CaLbdAppBreakdown> {
+  const rows = await caByProduit(sql, p)
+  const totalCa = Math.round(rows.reduce((acc, r) => acc + r.ca, 0) * 100) / 100
+  const totalVentes = rows.reduce((acc, r) => acc + r.ventes, 0)
+  const buckets = {
+    LBD: { ca: 0, ventes: 0 },
+    APP: { ca: 0, ventes: 0 },
+    Autres: { ca: 0, ventes: 0 },
+  }
+  for (const r of rows) {
+    const key = r.group ?? 'Autres'
+    buckets[key].ca += r.ca
+    buckets[key].ventes += r.ventes
+  }
+  for (const k of Object.keys(buckets) as Array<keyof typeof buckets>) {
+    buckets[k].ca = Math.round(buckets[k].ca * 100) / 100
+  }
+  const covered = buckets.LBD.ca + buckets.APP.ca
+  return {
+    total_ca: totalCa,
+    total_ventes: totalVentes,
+    lbd: buckets.LBD,
+    app: buckets.APP,
+    autres: buckets.Autres,
+    ecart: Math.round((totalCa - covered) * 100) / 100,
+  }
 }
 
 export async function chartClosingRateByCloser(
@@ -535,6 +646,10 @@ export interface FunnelBySourceRow {
   closing_rate: number | null
   ca_per_lead: number | null
   acv: number | null
+  // True dès qu'un des taux bruts (booking ou closing) dépasse 100 %, signe d'une
+  // attribution cross-période (call réservé/passé en dehors de la fenêtre, ou
+  // vente sans call tracké). Les taux affichés sont alors plafonnés à 100 %.
+  data_inconsistent: boolean
 }
 
 export interface FunnelBySource {
@@ -615,6 +730,9 @@ export async function funnelBySource(
     const callsCompleted = Math.trunc(nf(r.calls_completed))
     const ventes = Math.trunc(nf(r.ventes))
     const ca = nf(r.ca)
+    const rawBooking = leads ? (callsBooked / leads) * 100 : null
+    const rawClosing = callsCompleted ? (ventes / callsCompleted) * 100 : null
+    // show_rate ne peut physiquement pas dépasser 100 % (completed ⊆ booked), pas de cap nécessaire.
     return {
       source,
       canal: r.canal ?? 'Inconnu',
@@ -624,11 +742,12 @@ export async function funnelBySource(
       calls_completed: callsCompleted,
       ventes,
       ca: round2(ca) ?? 0,
-      booking_rate: leads ? Math.round((callsBooked / leads) * 1000) / 10 : null,
+      booking_rate: rawBooking !== null ? Math.round(Math.min(rawBooking, 100) * 10) / 10 : null,
       show_rate: callsBooked ? Math.round((callsCompleted / callsBooked) * 1000) / 10 : null,
-      closing_rate: callsCompleted ? Math.round((ventes / callsCompleted) * 1000) / 10 : null,
+      closing_rate: rawClosing !== null ? Math.round(Math.min(rawClosing, 100) * 10) / 10 : null,
       ca_per_lead: leads ? Math.round((ca / leads) * 100) / 100 : null,
       acv: ventes ? Math.round((ca / ventes) * 100) / 100 : null,
+      data_inconsistent: (rawBooking !== null && rawBooking > 100) || (rawClosing !== null && rawClosing > 100),
     }
   })
 

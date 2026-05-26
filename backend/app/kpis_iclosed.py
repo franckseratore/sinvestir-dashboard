@@ -1,7 +1,9 @@
 """KPIs iClosed — calculés depuis ic_calls et ic_deals dans DuckDB."""
+from typing import Optional
+
 from . import cache
 from .period_resolver import Period
-from .kpis import _get_target, _status, _scale_target
+from .kpis import _get_target, _status, _scale_target, _kpi_card
 
 
 def _safe(val, default=None):
@@ -146,6 +148,42 @@ def acv(p: Period, comp: Period = None) -> dict:
     scaled_t, scaled_s = _scale_target(t, p)
     status = _status(val, scaled_t, scaled_s, t["sens"] if t else None)
     return {"value": val, "comparison_value": comp_val, "delta_pct": delta_pct, "status": status}
+
+
+def _outcome_rate(outcome: str, p: Period) -> Optional[float]:
+    """Helper SQL : COUNT(outcome=X) / COUNT(outcome IS NOT NULL) sur ic_calls."""
+    row = cache.query(
+        """
+        SELECT COUNT(*) FILTER (WHERE outcome = ?)::float
+             / NULLIF(COUNT(*) FILTER (WHERE outcome IS NOT NULL), 0) AS rate
+        FROM ic_calls WHERE date BETWEEN ? AND ?
+        """,
+        [outcome, p.start, p.end],
+    )
+    return _safe(row.iloc[0]["rate"]) if not row.empty else None
+
+
+def _outcome_rate_card(indicateur: str, outcome: str, p: Period, comp: Period = None) -> dict:
+    """Renvoie un payload KpiCard complet pour un taux iClosed basé sur outcome.
+
+    Dénominateur = calls dont l'outcome a été renseigné (no-show inclus),
+    cohérent avec la définition iClosed native.
+    """
+    if not _table_exists("ic_calls"):
+        return _kpi_card(indicateur, None, None, p, fmt="percent")
+    val = _outcome_rate(outcome, p)
+    cval = _outcome_rate(outcome, comp) if comp else None
+    return _kpi_card(indicateur, val, cval, p, fmt="percent")
+
+
+def cancellation_rate(p: Period, comp: Period = None) -> dict:
+    """Taux d'annulation iClosed : outcome='CANCELLED' / outcome IS NOT NULL."""
+    return _outcome_rate_card("cancellation_rate", "CANCELLED", p, comp)
+
+
+def disqualification_rate(p: Period, comp: Period = None) -> dict:
+    """Taux de disqualification iClosed : outcome='DISQUALIFIED' / outcome IS NOT NULL."""
+    return _outcome_rate_card("disqualification_rate", "DISQUALIFIED", p, comp)
 
 
 def ventes_count(p: Period, comp: Period = None) -> dict:

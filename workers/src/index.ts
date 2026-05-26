@@ -15,7 +15,6 @@ import {
   volumeLeads,
   bookingRate,
   closingRate,
-  closingRateNet,
   cplPaid,
   roasPaid,
 } from './lib/kpis'
@@ -45,7 +44,9 @@ import {
   youtubeConcentration,
   closersTable,
   closingRateByCanal,
+  closingRateByCanalDetail,
   caByProduit,
+  caLbdAppBreakdown,
   chartClosingRateByCloser,
   roasByCanal,
   chartBudgetCaRoas,
@@ -72,6 +73,8 @@ import {
   revenueIc,
   acvIc,
   ventesCountIc,
+  cancellationRateIc,
+  disqualificationRateIc,
   closersTableIc,
   outcomesBreakdown,
   chartRevenueByDay,
@@ -238,20 +241,26 @@ app.get('/api/sales', async (c) => {
   const sql = c.get('sql')
   const { p, comp } = parsePeriod(c)
   try {
-    const [ca, vc, cpcall, cr, crn, cb, cc, ns, av, closers, chartCR, prod, byCanal] = await Promise.all([
+    const [
+      ca, vc, cpcall, cr, cb, cc, ns, av, cancel, disq,
+      lbdApp, closers, chartCR, prod, byCanal, byCanalDetail,
+    ] = await Promise.all([
       caHt(sql, p, comp),
       ventesCount(sql, p, comp),
       caPerCall(sql, p, comp),
       closingRate(sql, p, comp),
-      closingRateNet(sql, p, comp),
       callsBooked(sql, p, comp),
       callsCompleted(sql, p, comp),
       noShowRate(sql, p, comp),
       acv(sql, p, comp),
+      cancellationRateIc(sql, p, comp),
+      disqualificationRateIc(sql, p, comp),
+      caLbdAppBreakdown(sql, p),
       closersTable(sql, p),
       chartClosingRateByCloser(sql, p),
       caByProduit(sql, p),
       closingRateByCanal(sql, p),
+      closingRateByCanalDetail(sql, p),
     ])
     return c.json({
       period: periodMeta(p),
@@ -260,16 +269,19 @@ app.get('/api/sales', async (c) => {
         ventes_count: vc,
         ca_per_call: cpcall,
         closing_rate: cr,
-        closing_rate_net: crn,
         calls_booked: cb,
         calls_completed: cc,
         no_show_rate: ns,
         acv: av,
+        cancellation_rate: cancel,
+        disqualification_rate: disq,
       },
+      ca_lbd_app: lbdApp,
       closers,
       chart_closing_rate: chartCR,
       produits: prod,
       closing_by_canal: byCanal,
+      closing_by_canal_detail: byCanalDetail,
     })
   } catch (err: unknown) {
     return c.json({ error: 'kpi_error', message: err instanceof Error ? err.message : String(err) }, 500)

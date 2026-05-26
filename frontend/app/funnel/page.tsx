@@ -13,6 +13,17 @@ function pctCell(value: number | null) {
   return <span className="font-mono">{value.toFixed(1).replace('.', ',')} %</span>
 }
 
+function InconsistentBadge() {
+  return (
+    <span
+      title="Données incohérentes : un des taux bruts (booking ou closing) dépasse 100 %, signe d'une attribution cross-période (calls réservés hors fenêtre ou ventes sans call tracké). Taux plafonnés à 100 %."
+      className="ml-1.5 inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200"
+    >
+      ⚠ incohérent
+    </span>
+  )
+}
+
 const columns: ColumnDef<FunnelBySourceRow, unknown>[] = [
   {
     accessorKey: 'source',
@@ -29,7 +40,17 @@ const columns: ColumnDef<FunnelBySourceRow, unknown>[] = [
   {
     accessorKey: 'booking_rate',
     header: 'Booking %',
-    cell: (i) => pctCell(i.getValue() as number | null),
+    cell: (i) => {
+      const v = i.getValue() as number | null
+      const row = i.row.original
+      const inconsistent = row.data_inconsistent && v !== null && v >= 100
+      return (
+        <span className="inline-flex items-center">
+          {pctCell(v)}
+          {inconsistent && <InconsistentBadge />}
+        </span>
+      )
+    },
   },
   {
     accessorKey: 'show_rate',
@@ -42,8 +63,15 @@ const columns: ColumnDef<FunnelBySourceRow, unknown>[] = [
     cell: (i) => {
       const v = i.getValue() as number | null
       if (v === null) return <span className="text-zinc-400">—</span>
+      const row = i.row.original
+      const inconsistent = row.data_inconsistent && v >= 100
       const color = v >= 30 ? 'text-emerald-600' : v >= 15 ? 'text-amber-600' : 'text-rose-500'
-      return <span className={`font-mono font-semibold ${color}`}>{v.toFixed(1).replace('.', ',')} %</span>
+      return (
+        <span className="inline-flex items-center">
+          <span className={`font-mono font-semibold ${color}`}>{v.toFixed(1).replace('.', ',')} %</span>
+          {inconsistent && <InconsistentBadge />}
+        </span>
+      )
     },
   },
   {

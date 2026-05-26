@@ -110,6 +110,7 @@ def sales(
     compare: bool = Query(False),
 ):
     p, comp = _parse_period(period, start, end, compare)
+    from . import kpis_iclosed as ki
     return _json({
         "period": {"start": str(p.start), "end": str(p.end), "label": p.label},
         "kpis": {
@@ -117,16 +118,19 @@ def sales(
             "ventes_count": kpis.ventes_count(p, comp),
             "ca_per_call": kpis.ca_per_call(p, comp),
             "closing_rate": kpis.closing_rate(p, comp),
-            "closing_rate_net": kpis.closing_rate_net(p, comp),
             "calls_booked": kpis.calls_booked(p, comp),
             "calls_completed": kpis.calls_completed(p, comp),
             "no_show_rate": kpis.no_show_rate(p, comp),
             "acv": kpis.acv(p, comp),
+            "cancellation_rate": ki.cancellation_rate(p, comp),
+            "disqualification_rate": ki.disqualification_rate(p, comp),
         },
+        "ca_lbd_app": kpis.ca_lbd_app_breakdown(p),
         "closers": kpis.closing_rate_by_closer(p),
         "chart_closing_rate": kpis.chart_closing_rate_by_closer(p),
         "produits": kpis.ca_by_produit(p),
         "closing_by_canal": kpis.closing_rate_by_canal(p),
+        "closing_by_canal_detail": kpis.closing_rate_by_canal_detail(p),
     })
 
 

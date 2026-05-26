@@ -339,30 +339,7 @@ def no_show_rate(period: Period, comp: Optional[Period] = None) -> dict:
 
 
 def closing_rate(period: Period, comp: Optional[Period] = None) -> dict:
-    """Taux de closing brut : ventes / calls réservés (inclut no-shows)."""
-    sales = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [period.start, period.end])
-    booked = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ?", [period.start, period.end])
-    val = _safe_div(sales, booked)
-    cval = None
-    if comp:
-        cs = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [comp.start, comp.end])
-        cb = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ?", [comp.start, comp.end])
-        cval = _safe_div(cs, cb)
-    weeks = _last_4_iso_weeks()
-    weekly = []
-    for m, s in weeks:
-        sl = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [m, s])
-        bk = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ?", [m, s])
-        r = _safe_div(sl, bk)
-        if r is not None:
-            weekly.append(r)
-    mov4w = round(sum(weekly) / len(weekly), 4) if weekly else None
-    ta = len(weekly) == 4 and all(weekly[i + 1] < weekly[i] for i in range(3))
-    return _kpi_card("closing_rate", val, cval, period, fmt="percent", trend_alert=ta, moving_avg_4w=mov4w)
-
-
-def closing_rate_net(period: Period, comp: Optional[Period] = None) -> dict:
-    """Taux de closing net : ventes / calls passés (hors no-shows)."""
+    """Closing rate brut : ventes / calls passés (is_past=TRUE)."""
     sales = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [period.start, period.end])
     completed = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ? AND is_past = TRUE", [period.start, period.end])
     val = _safe_div(sales, completed)
@@ -371,7 +348,17 @@ def closing_rate_net(period: Period, comp: Optional[Period] = None) -> dict:
         cs = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [comp.start, comp.end])
         cc = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ? AND is_past = TRUE", [comp.start, comp.end])
         cval = _safe_div(cs, cc)
-    return _kpi_card("closing_rate_net", val, cval, period, fmt="percent")
+    weeks = _last_4_iso_weeks()
+    weekly = []
+    for m, s in weeks:
+        sl = cache.query_one("SELECT COUNT(*) FROM ventes WHERE date BETWEEN ? AND ?", [m, s])
+        bk = cache.query_one("SELECT COUNT(*) FROM calls WHERE date_reservation BETWEEN ? AND ? AND is_past = TRUE", [m, s])
+        r = _safe_div(sl, bk)
+        if r is not None:
+            weekly.append(r)
+    mov4w = round(sum(weekly) / len(weekly), 4) if weekly else None
+    ta = len(weekly) == 4 and all(weekly[i + 1] < weekly[i] for i in range(3))
+    return _kpi_card("closing_rate", val, cval, period, fmt="percent", trend_alert=ta, moving_avg_4w=mov4w)
 
 
 def booking_rate_paid(period: Period, comp: Optional[Period] = None) -> dict:
@@ -423,6 +410,31 @@ def closing_rate_by_closer(period: Period) -> List[dict]:
     return sorted(rows, key=lambda r: r["ca"], reverse=True)
 
 
+def _build_closing_rows(merged, group_keys: List[str]) -> List[dict]:
+    """Construit les lignes closing rate brut (ventes / calls passés) depuis un merge déjà fait."""
+    rows = []
+    for _, row in merged.iterrows():
+        sales = int(row.get("ventes", 0))
+        calls = int(row.get("calls", 0))
+        # Ventes attribuées au groupe sans call passé correspondant dans la fenêtre :
+        # call hors période ou vente hors-call. On les sort du ratio (closing plafonné à 100 %)
+        # et on les compte à part pour rester transparent.
+        ventes_hors_call = max(0, sales - calls)
+        raw_rate = (sales / calls * 100) if calls else None
+        capped_rate = round(min(raw_rate, 100.0), 1) if raw_rate is not None else None
+        out = {k: str(row[k]) for k in group_keys}
+        out.update({
+            "calls": calls,
+            "ventes": sales,
+            "closing_rate": capped_rate,
+            "ventes_hors_call": ventes_hors_call,
+            "data_inconsistent": raw_rate is not None and raw_rate > 100.0,
+            "ca": round(float(row.get("ca", 0)), 2),
+        })
+        rows.append(out)
+    return sorted(rows, key=lambda r: r["ca"], reverse=True)
+
+
 def closing_rate_by_canal(period: Period) -> List[dict]:
     df_sales = cache.query(
         "SELECT canal, COUNT(*) as ventes, COALESCE(SUM(ca_ht),0) as ca FROM ventes WHERE date BETWEEN ? AND ? GROUP BY canal",
@@ -433,18 +445,21 @@ def closing_rate_by_canal(period: Period) -> List[dict]:
         [period.start, period.end],
     )
     merged = df_sales.merge(df_calls, on="canal", how="outer").fillna(0)
-    rows = []
-    for _, row in merged.iterrows():
-        sales = int(row.get("ventes", 0))
-        calls = int(row.get("calls", 0))
-        rows.append({
-            "canal": str(row["canal"]),
-            "calls": calls,
-            "ventes": sales,
-            "closing_rate": round(sales / calls * 100, 1) if calls else None,
-            "ca": round(float(row.get("ca", 0)), 2),
-        })
-    return sorted(rows, key=lambda r: r["ca"], reverse=True)
+    return _build_closing_rows(merged, ["canal"])
+
+
+def closing_rate_by_canal_detail(period: Period) -> List[dict]:
+    """Closing rate brut groupé par (canal, sous_canal) — un cran sous le canal principal."""
+    df_sales = cache.query(
+        "SELECT canal, sous_canal, COUNT(*) as ventes, COALESCE(SUM(ca_ht),0) as ca FROM ventes WHERE date BETWEEN ? AND ? GROUP BY canal, sous_canal",
+        [period.start, period.end],
+    )
+    df_calls = cache.query(
+        "SELECT canal, sous_canal, COUNT(*) as calls FROM calls WHERE date_reservation BETWEEN ? AND ? AND is_past = TRUE GROUP BY canal, sous_canal",
+        [period.start, period.end],
+    )
+    merged = df_sales.merge(df_calls, on=["canal", "sous_canal"], how="outer").fillna(0)
+    return _build_closing_rows(merged, ["canal", "sous_canal"])
 
 
 def acv(period: Period, comp: Optional[Period] = None) -> dict:
@@ -465,12 +480,63 @@ def ventes_count(period: Period, comp: Optional[Period] = None) -> dict:
     return _kpi_card("ventes_count", val, cval, period, fmt="number")
 
 
+def _produit_group(nom: Optional[str]) -> Optional[str]:
+    """Classifie un produit en groupe métier (LBD, APP) pour agrégation.
+
+    LBD  = toutes les variantes/upsells de 'la bourse démocratisée' (insensible accents/casse).
+    APP  = S'investir Conseil (insensible casse, match 'conseil').
+    None = produit hors périmètre LBD/APP (compté dans 'Autres').
+    """
+    if not nom:
+        return None
+    n = nom.lower()
+    # Match sans dépendance aux accents : 'démocratis'/'democratis' tolérés
+    if "bourse" in n and ("democratis" in n.replace("é", "e") or "démocratis" in n):
+        return "LBD"
+    if "conseil" in n:
+        return "APP"
+    return None
+
+
 def ca_by_produit(period: Period) -> List[dict]:
     df = cache.query(
         "SELECT produit_nom, COUNT(*) as ventes, COALESCE(SUM(ca_ht),0) as ca FROM ventes WHERE date BETWEEN ? AND ? GROUP BY produit_nom ORDER BY ca DESC",
         [period.start, period.end],
     )
-    return [{"produit": r["produit_nom"], "ventes": int(r["ventes"]), "ca": round(float(r["ca"]), 2), "acv": round(float(r["ca"]) / int(r["ventes"]), 2) if r["ventes"] else None} for _, r in df.iterrows()]
+    return [{
+        "produit": r["produit_nom"],
+        "group": _produit_group(r["produit_nom"]),
+        "ventes": int(r["ventes"]),
+        "ca": round(float(r["ca"]), 2),
+        "acv": round(float(r["ca"]) / int(r["ventes"]), 2) if r["ventes"] else None,
+    } for _, r in df.iterrows()]
+
+
+def ca_lbd_app_breakdown(period: Period) -> dict:
+    """Décompose le CA HT total entre LBD, APP (S'investir Conseil) et reste.
+
+    Permet de vérifier que la somme LBD + APP réconcilie avec le CA total
+    (un écart signale du CA hors-périmètre — à flagger côté UI).
+    """
+    rows = ca_by_produit(period)
+    total_ca = round(sum(r["ca"] for r in rows), 2)
+    total_ventes = sum(r["ventes"] for r in rows)
+    buckets: dict = {"LBD": {"ca": 0.0, "ventes": 0}, "APP": {"ca": 0.0, "ventes": 0}, "Autres": {"ca": 0.0, "ventes": 0}}
+    for r in rows:
+        key = r["group"] or "Autres"
+        buckets[key]["ca"] += r["ca"]
+        buckets[key]["ventes"] += r["ventes"]
+    for k, b in buckets.items():
+        b["ca"] = round(b["ca"], 2)
+    covered = buckets["LBD"]["ca"] + buckets["APP"]["ca"]
+    return {
+        "total_ca": total_ca,
+        "total_ventes": int(total_ventes),
+        "lbd": buckets["LBD"],
+        "app": buckets["APP"],
+        "autres": buckets["Autres"],
+        "ecart": round(total_ca - covered, 2),
+    }
 
 
 def ca_by_closer(period: Period) -> List[dict]:
@@ -845,7 +911,6 @@ def global_status(period: Period) -> dict:
         (ca_per_lead,         "CA / Lead",           "marketing", "/marketing"),
         (ca_ht,               "CA HT",               "sales",     "/sales"),
         (closing_rate,        "Closing brut",        "sales",     "/sales"),
-        (closing_rate_net,    "Closing net",         "sales",     "/sales"),
         (no_show_rate,        "No-show Rate",        "sales",     "/sales"),
         (acv,                 "Panier moyen",        "sales",     "/sales"),
         (ca_per_call,         "CA / Call",           "sales",     "/sales"),

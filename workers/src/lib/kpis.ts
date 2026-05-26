@@ -152,37 +152,7 @@ export async function closingRate(
   period: Period,
   comp: Period | null,
 ): Promise<KpiCard> {
-  // Brut : ventes / calls réservés (inclut no-shows)
-  const sales = await scalar(
-    sql,
-    sql`SELECT COUNT(*) AS v FROM ventes WHERE date BETWEEN ${period.start} AND ${period.end}`,
-  )
-  const booked = await scalar(
-    sql,
-    sql`SELECT COUNT(*) AS v FROM calls WHERE date_reservation BETWEEN ${period.start} AND ${period.end}`,
-  )
-  const val = safeDiv(sales, booked)
-  let cval: number | null = null
-  if (comp) {
-    const cs = await scalar(
-      sql,
-      sql`SELECT COUNT(*) AS v FROM ventes WHERE date BETWEEN ${comp.start} AND ${comp.end}`,
-    )
-    const cb = await scalar(
-      sql,
-      sql`SELECT COUNT(*) AS v FROM calls WHERE date_reservation BETWEEN ${comp.start} AND ${comp.end}`,
-    )
-    cval = safeDiv(cs, cb)
-  }
-  return buildKpiCard(sql, 'closing_rate', val, cval, period, 'percent')
-}
-
-export async function closingRateNet(
-  sql: postgres.Sql,
-  period: Period,
-  comp: Period | null,
-): Promise<KpiCard> {
-  // Net : ventes / calls passés (hors no-shows)
+  // Closing rate brut : ventes / calls passés (is_past=TRUE).
   const sales = await scalar(
     sql,
     sql`SELECT COUNT(*) AS v FROM ventes WHERE date BETWEEN ${period.start} AND ${period.end}`,
@@ -204,7 +174,7 @@ export async function closingRateNet(
     )
     cval = safeDiv(cs, cc)
   }
-  return buildKpiCard(sql, 'closing_rate_net', val, cval, period, 'percent')
+  return buildKpiCard(sql, 'closing_rate', val, cval, period, 'percent')
 }
 
 export async function cplPaid(

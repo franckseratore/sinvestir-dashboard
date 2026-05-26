@@ -79,11 +79,31 @@ export type MarketingData = {
 
 export type SalesData = {
   period: PeriodMeta
-  kpis: { ca_ht: KpiCard; ventes_count: KpiCard; ca_per_call: KpiCard; closing_rate: KpiCard; closing_rate_net: KpiCard; calls_booked: KpiCard; calls_completed: KpiCard; no_show_rate: KpiCard; acv: KpiCard }
+  kpis: {
+    ca_ht: KpiCard
+    ventes_count: KpiCard
+    ca_per_call: KpiCard
+    closing_rate: KpiCard
+    calls_booked: KpiCard
+    calls_completed: KpiCard
+    no_show_rate: KpiCard
+    acv: KpiCard
+    cancellation_rate: KpiCard
+    disqualification_rate: KpiCard
+  }
+  ca_lbd_app: {
+    total_ca: number
+    total_ventes: number
+    lbd: { ca: number; ventes: number }
+    app: { ca: number; ventes: number }
+    autres: { ca: number; ventes: number }
+    ecart: number
+  }
   closers: { closer: string; calls: number; ventes: number; closing_rate: number | null; ca: number; acv: number | null }[]
   chart_closing_rate: { date: string; closer: string; closing_rate: number | null }[]
-  produits: { produit: string; ventes: number; ca: number; acv: number | null }[]
-  closing_by_canal: { canal: string; calls: number; ventes: number; closing_rate: number | null; ca: number }[]
+  produits: { produit: string; group: 'LBD' | 'APP' | null; ventes: number; ca: number; acv: number | null }[]
+  closing_by_canal: { canal: string; calls: number; ventes: number; closing_rate: number | null; ventes_hors_call: number; data_inconsistent: boolean; ca: number }[]
+  closing_by_canal_detail: { canal: string; sous_canal: string; calls: number; ventes: number; closing_rate: number | null; ventes_hors_call: number; data_inconsistent: boolean; ca: number }[]
 }
 
 export type AdsData = {
@@ -209,6 +229,7 @@ export type FunnelBySourceRow = {
   closing_rate: number | null
   ca_per_lead: number | null
   acv: number | null
+  data_inconsistent: boolean
 }
 
 export type FunnelBySourceData = {
