@@ -777,24 +777,6 @@ def chart_leads_by_canal(period: Period) -> List[dict]:
     return [{"date": str(r["d"])[:10], "canal": str(r["canal"]), "value": int(r["n"])} for _, r in df.iterrows()]
 
 
-def chart_closing_rate_by_closer(period: Period) -> List[dict]:
-    grp = _date_trunc("date", period.granularity)
-    grp_r = _date_trunc("date_reservation", period.granularity)
-    df_ventes = cache.query(
-        f"SELECT {grp} as d, closer, COUNT(*) as ventes FROM ventes WHERE date BETWEEN ? AND ? GROUP BY {grp}, closer ORDER BY {grp}",
-        [period.start, period.end],
-    )
-    df_calls = cache.query(
-        f"SELECT {grp_r} as d, closer, COUNT(*) as calls FROM calls WHERE date_reservation BETWEEN ? AND ? AND is_past = TRUE GROUP BY {grp_r}, closer ORDER BY {grp_r}",
-        [period.start, period.end],
-    )
-    df_ventes = df_ventes.rename(columns={"d": "date"})
-    df_calls = df_calls.rename(columns={"d": "date"})
-    merged = df_ventes.merge(df_calls, on=["date", "closer"], how="outer").fillna(0)
-    merged["closing_rate"] = merged.apply(lambda r: round(r["ventes"] / r["calls"] * 100, 1) if r["calls"] else None, axis=1)
-    return [{"date": str(r["date"])[:10], "closer": str(r["closer"]), "closing_rate": r["closing_rate"]} for _, r in merged.iterrows()]
-
-
 def chart_budget_ca_roas(period: Period) -> List[dict]:
     grp = _date_trunc("date", period.granularity)
     df_b = cache.query(

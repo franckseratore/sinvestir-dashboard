@@ -439,40 +439,6 @@ export async function caLbdAppBreakdown(sql: postgres.Sql, p: Period): Promise<C
   }
 }
 
-export async function chartClosingRateByCloser(
-  sql: postgres.Sql,
-  p: Period,
-): Promise<Array<{ date: string; closer: string; closing_rate: number | null }>> {
-  const grpV = dateTrunc('date', p.granularity)
-  const grpR = dateTrunc('date_reservation', p.granularity)
-  const rows = await sql<Array<{ date: Date | string; closer: string | null; ventes: string | number; calls: string | number }>>`
-    WITH v AS (
-      SELECT ${sql.unsafe(grpV)} AS date, closer, COUNT(*) AS ventes FROM ventes
-      WHERE date BETWEEN ${p.start} AND ${p.end} GROUP BY ${sql.unsafe(grpV)}, closer
-    ),
-    c AS (
-      SELECT ${sql.unsafe(grpR)} AS date, closer, COUNT(*) AS calls FROM calls
-      WHERE date_reservation BETWEEN ${p.start} AND ${p.end} AND is_past = TRUE
-      GROUP BY ${sql.unsafe(grpR)}, closer
-    ),
-    keys AS (
-      SELECT date, closer FROM v UNION SELECT date, closer FROM c
-    )
-    SELECT k.date, k.closer, COALESCE(v.ventes,0) AS ventes, COALESCE(c.calls,0) AS calls
-    FROM keys k LEFT JOIN v USING (date, closer) LEFT JOIN c USING (date, closer)
-    ORDER BY k.date
-  `
-  return rows.map((r) => {
-    const calls = Math.trunc(nf(r.calls))
-    const ventes = Math.trunc(nf(r.ventes))
-    return {
-      date: (typeof r.date === 'string' ? r.date : r.date.toISOString()).slice(0, 10),
-      closer: r.closer ?? '',
-      closing_rate: calls ? Math.round((ventes / calls) * 1000) / 10 : null,
-    }
-  })
-}
-
 // ─── Ads ────────────────────────────────────────────────────────────────────
 
 export async function roasByCanal(

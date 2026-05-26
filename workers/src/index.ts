@@ -47,7 +47,6 @@ import {
   closingRateByCanalDetail,
   caByProduit,
   caLbdAppBreakdown,
-  chartClosingRateByCloser,
   roasByCanal,
   chartBudgetCaRoas,
   creativesTable,
@@ -243,7 +242,7 @@ app.get('/api/sales', async (c) => {
   try {
     const [
       ca, vc, cpcall, cr, cb, cc, ns, av, cancel, disq,
-      lbdApp, closers, chartCR, prod, byCanal, byCanalDetail,
+      lbdApp, closers, prod, byCanal, byCanalDetail,
     ] = await Promise.all([
       caHt(sql, p, comp),
       ventesCount(sql, p, comp),
@@ -257,7 +256,6 @@ app.get('/api/sales', async (c) => {
       disqualificationRateIc(sql, p, comp),
       caLbdAppBreakdown(sql, p),
       closersTable(sql, p),
-      chartClosingRateByCloser(sql, p),
       caByProduit(sql, p),
       closingRateByCanal(sql, p),
       closingRateByCanalDetail(sql, p),
@@ -278,7 +276,6 @@ app.get('/api/sales', async (c) => {
       },
       ca_lbd_app: lbdApp,
       closers,
-      chart_closing_rate: chartCR,
       produits: prod,
       closing_by_canal: byCanal,
       closing_by_canal_detail: byCanalDetail,

@@ -127,7 +127,6 @@ def sales(
         },
         "ca_lbd_app": kpis.ca_lbd_app_breakdown(p),
         "closers": kpis.closing_rate_by_closer(p),
-        "chart_closing_rate": kpis.chart_closing_rate_by_closer(p),
         "produits": kpis.ca_by_produit(p),
         "closing_by_canal": kpis.closing_rate_by_canal(p),
         "closing_by_canal_detail": kpis.closing_rate_by_canal_detail(p),
